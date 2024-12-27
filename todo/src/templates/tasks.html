@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>To-Dos</title>
+    <style>
+        body {
+            font-family: "Roboto", Helvetica, Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+<h1>To-Dos</h1>
+<ul style="list-style-type: none;">
+    {% for task in tasks %}
+    <!--<li><input type="checkbox">{{ task.title }}</li>-->
+    <li>
+        <form method="POST" action="/tick">
+            <input type="hidden" name="task_id" value="{{ task.id }}">
+            <input type="checkbox" onchange="this.form.submit()">{% if task.completed %}checked{% endif %}
+            {{ task.title }}
+        </form>
+    </li>
+    {% endfor %}
+</ul>
+</body>
+</html>
