@@ -1,0 +1,53 @@
+body {
+    font-family: "Roboto", Helvetica, Arial, sans-serif;
+}
+
+.due-date-wrapper {
+    position: relative; /* Damit .due-date-form absolut positioniert werden kann */
+    display: inline-block; /* Oder block, je nach Layoutwunsch */
+    padding: 10px 20px; /* Großzügige Innenabstände, damit man sicher "drüber" ist */
+    margin: 0 0 0 auto; /* Beispiel: nach rechts schieben (optional) */
+}
+
+/* Der Text, der immer zu sehen ist */
+.due-date-label {
+    font-size: 0.85rem;
+    color: #333;
+}
+
+.due-date-label.no-date {
+    color: #999;
+}
+
+/* Das eigentlich versteckte Formular */
+.due-date-form {
+    display: none; /* Unsichtbar, bis Hover */
+    position: absolute; /* Überlagert den Inhalt */
+    top: 100%; /* Direkt unterhalb der Wrapper-Box */
+    right: 0; /* Am rechten Rand ausrichten */
+    background-color: #fff; /* Weißer Hintergrund */
+    border: 1px solid #ccc;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+    padding: 8px;
+    min-width: 200px;
+    z-index: 999;
+}
+
+/* Eingabefelder etwas stylen */
+.due-date-form input[type="datetime-local"] {
+    padding: 4px;
+    font-size: 0.85rem;
+    width: 140px;
+    margin-right: 5px;
+}
+
+.due-date-form button {
+    padding: 4px 8px;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+/* Bei Hover über den gesamten Wrapper: Formular anzeigen */
+.due-date-wrapper:hover .due-date-form {
+    display: block;
+}
