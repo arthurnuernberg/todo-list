@@ -10,15 +10,16 @@ use std::sync::{Arc, Mutex};
 use tera::{Context, Tera};
 
 pub fn routes() -> Router {
-    // Beispiel-Daten initialisieren
+    // Beispiel-Daten
     let todos = Arc::new(Mutex::new(vec![
-        ToDo::new(1, "Learn Rust".to_string(), None, false),
-        ToDo::new(2, "Write Axum app".to_string(), None, false),
+        ToDo::new(1, "Rust lernen".to_string(), None, false),
+        ToDo::new(2, "Axum verstehen".to_string(), None, false),
+        ToDo::new(3, "Kaffee kochen".to_string(), Some("Filterkaffee...".to_string()), true),
     ]));
 
     let app_state = AppState {
         todos,
-        next_id: Arc::new(Mutex::new(3)),
+        next_id: Arc::new(Mutex::new(4)),
     };
 
     Router::new()

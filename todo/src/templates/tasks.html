@@ -9,26 +9,63 @@
         }
     </style>
 </head>
-<body>
+<body style="font-family: Arial, sans-serif; margin: 40px;">
 <h1>To-Dos</h1>
-<ul style="list-style-type: none;">
+<ul style="list-style-type: none; padding: 0;">
     {% for task in tasks %}
-    <!--<li><input type="checkbox">{{ task.title }}</li>-->
-    <li>
-        <form method="POST" action="/tick">
-            <input type="hidden" name="task_id" value="{{ task.id }}">
-            <input
-                    type="checkbox"
-                    onchange="this.form.submit()"
-                    {% if task.completed %}checked{% endif %}
-            >
-            {{ task.title }}
-        </form>
+    <li style="border-bottom: 1px solid #ccc; padding: 10px 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <!-- Linker Bereich: Checkbox + Titel -->
+            <div>
+                <!-- Checkbox in einem Inline-Formular -->
+                <form method="POST" action="/tick" style="display: inline;">
+                    <input type="hidden" name="task_id" value="{{ task.id }}">
+                    <input
+                            type="checkbox"
+                            onchange="this.form.submit()"
+                            {% if task.completed %}checked{% endif %}
+                    >
+                </form>
+                <strong>{{ task.title }}</strong>
+            </div>
+
+            <!-- Rechter Bereich: Fälligkeitsdatum -->
+            <div style="text-align: right;">
+                {% if task.due_date %}
+                <span style="font-size: 0.8rem; color: #333;">
+                            Fällig: {{ task.due_date | date(format="%d.%m.%Y %H:%M") }}
+                        </span>
+                {% else %}
+                <span style="font-size: 0.8rem; color: #999;">
+                            Kein Fälligkeitsdatum angegeben
+                        </span>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Beschreibung in kleinerer Schrift, falls vorhanden -->
+        {% if task.description %}
+        <p style="margin: 5px 0 0; font-size: 0.85rem; color: #666;">
+            {{ task.description }}
+        </p>
+        {% endif %}
     </li>
     {% endfor %}
 </ul>
-<form method="POST" action="/new_task">
-    <input name="task_title">
+
+<!-- Neues To-Do hinzufügen -->
+<form method="POST" action="/new_task" style="margin-top: 20px;">
+    <label for="task_title" style="display: block; margin-bottom: 5px;">Neue Aufgabe:</label>
+    <input
+            id="task_title"
+            name="task_title"
+            type="text"
+            style="padding: 5px; width: 200px;"
+            placeholder="Titel eingeben"
+    >
+    <button type="submit" style="padding: 5px 10px; margin-left: 5px;">
+        Hinzufügen
+    </button>
 </form>
 </body>
 </html>
