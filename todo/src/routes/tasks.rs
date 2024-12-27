@@ -2,7 +2,7 @@ use axum::{
     extract::{Form, State},
     response::{Html, Redirect},
     routing::{get, post},
-    Router,
+    Json, Router,
 };
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
@@ -12,32 +12,43 @@ use tera::{Context, Tera};
 pub fn routes() -> Router {
     // Beispiel-Daten
     let todos = Arc::new(Mutex::new(vec![
-        ToDo::new(1, "Rust lernen".to_string(), None, false),
-        ToDo::new(2, "Axum verstehen".to_string(), None, false),
-        ToDo::new(3, "Kaffee kochen".to_string(), Some("Filterkaffee...".to_string()), true),
+        ToDo::new(1, "X aufkaufen".to_string(), None, true),
+        ToDo::new(
+            2,
+            "Kaffee kochen".to_string(),
+            Some("Filterkaffee...".to_string()),
+            false,
+        ),
     ]));
 
     let app_state = AppState {
         todos,
         next_id: Arc::new(Mutex::new(4)),
+        title: Arc::new(Mutex::new(String::from("To-dos"))),
     };
 
     Router::new()
         .route("/", get(tasks))
         .route("/tick", post(tick_task))
         .route("/new_task", post(new_task))
+        .route("/delete_task", post(delete_task))
+        .route("/update_title", post(update_title))
+        .route("/update_date", post(update_due_date))
         .with_state(app_state) // AppState hier binden
 }
 
 async fn tasks(State(state): State<AppState>) -> Html<String> {
     let todos = state.todos.lock().unwrap(); // Zugriff auf die gemeinsam genutzte ToDo-Liste
+    let title = state.title.lock().unwrap();
 
     // Tera-Instanz erstellen
     let tera = Tera::new("src/templates/**/*").unwrap();
 
     // Kontext erstellen und Daten hinzufügen
     let mut context = Context::new();
+
     context.insert("tasks", &*todos);
+    context.insert("title", &*title);
 
     // Template rendern
     let rendered = tera.render("tasks.html", &context).unwrap();
@@ -46,7 +57,7 @@ async fn tasks(State(state): State<AppState>) -> Html<String> {
 
 // Form-Daten
 #[derive(Deserialize)]
-struct TickForm {
+struct TaskForm {
     task_id: u32,
 }
 
@@ -54,11 +65,21 @@ struct TickForm {
 struct ChangeTaskForm {
     task_title: String,
     task_description: Option<String>,
-    // task_completed: bool,
+}
+
+#[derive(Deserialize)]
+struct TitleUpdate {
+    title: String,
+}
+
+#[derive(Deserialize)]
+struct DueDateUpdate {
+    task_id: u32,
+    due_date: DateTime<Local>,
 }
 
 // POST-Handler für /tick
-async fn tick_task(State(state): State<AppState>, Form(input): Form<TickForm>) -> Redirect {
+async fn tick_task(State(state): State<AppState>, Form(input): Form<TaskForm>) -> Redirect {
     let mut todos = state.todos.lock().unwrap();
     if let Some(task) = todos.iter_mut().find(|t| t.id == input.task_id) {
         task.tick();
@@ -69,17 +90,42 @@ async fn tick_task(State(state): State<AppState>, Form(input): Form<TickForm>) -
 
 async fn new_task(State(state): State<AppState>, Form(input): Form<ChangeTaskForm>) -> Redirect {
     let mut todos = state.todos.lock().unwrap();
+    if input.task_title.is_empty() {
+        return Redirect::to("/");
+    }
     let new_todo: ToDo = ToDo::new(
         state.generate_id(),
         input.task_title,
         input.task_description,
         false,
     );
-    println!(
-        "ID: {}\nTitel: {}",
-        new_todo.id, new_todo.title
-    );
+    println!("ID: {}\nTitel: {}", new_todo.id, new_todo.title);
     todos.insert(0, new_todo);
+    Redirect::to("/")
+}
+
+async fn delete_task(State(state): State<AppState>, form: Form<TaskForm>) -> Redirect {
+    let mut todos = state.todos.lock().unwrap();
+    if let Some(pos) = todos.iter().position(|todo| todo.id == form.task_id) {
+        todos.remove(pos);
+    }
+    Redirect::to("/")
+}
+
+async fn update_title(State(state): State<AppState>, Json(payload): Json<TitleUpdate>) -> Redirect {
+    let mut title = state.title.lock().unwrap();
+    *title = payload.title;
+    Redirect::to("/")
+}
+
+async fn update_due_date(
+    State(state): State<AppState>,
+    Form(input): Form<DueDateUpdate>,
+) -> Redirect {
+    let mut todos = state.todos.lock().unwrap();
+    if let Some(task) = todos.iter_mut().find(|t| t.id == input.task_id) {
+        task.due_date = Some(input.due_date);
+    }
     Redirect::to("/")
 }
 
@@ -116,6 +162,7 @@ impl ToDo {
 struct AppState {
     todos: Arc<Mutex<Vec<ToDo>>>,
     next_id: Arc<Mutex<u32>>,
+    title: Arc<Mutex<String>>,
 }
 
 #[allow(dead_code)]
@@ -124,6 +171,7 @@ impl AppState {
         AppState {
             todos: Arc::new(Mutex::new(Vec::new())),
             next_id: Arc::new(Mutex::new(1)),
+            title: Arc::new(Mutex::new(String::from("To-dos"))),
         }
     }
 
