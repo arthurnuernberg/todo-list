@@ -17,11 +17,18 @@
     <li>
         <form method="POST" action="/tick">
             <input type="hidden" name="task_id" value="{{ task.id }}">
-            <input type="checkbox" onchange="this.form.submit()">{% if task.completed %}checked{% endif %}
+            <input
+                    type="checkbox"
+                    onchange="this.form.submit()"
+                    {% if task.completed %}checked{% endif %}
+            >
             {{ task.title }}
         </form>
     </li>
     {% endfor %}
 </ul>
+<form method="POST" action="/new_task">
+    <input name="task_title">
+</form>
 </body>
 </html>

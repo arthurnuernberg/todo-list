@@ -1,7 +1,6 @@
 use axum::{
     extract::{Form, State},
-    http::StatusCode,
-    response::Html,
+    response::{Html, Redirect},
     routing::{get, post},
     Router,
 };
@@ -17,11 +16,15 @@ pub fn routes() -> Router {
         ToDo::new(2, "Write Axum app".to_string(), None, false),
     ]));
 
-    let app_state = AppState { todos };
+    let app_state = AppState {
+        todos,
+        next_id: Arc::new(Mutex::new(3)),
+    };
 
     Router::new()
-        .route("/tasks", get(tasks))
-        .route("/tasks/tick", post(tick_task))
+        .route("/", get(tasks))
+        .route("/tick", post(tick_task))
+        .route("/new_task", post(new_task))
         .with_state(app_state) // AppState hier binden
 }
 
@@ -46,15 +49,37 @@ struct TickForm {
     task_id: u32,
 }
 
+#[derive(Deserialize)]
+struct ChangeTaskForm {
+    task_title: String,
+    task_description: Option<String>,
+    // task_completed: bool,
+}
+
 // POST-Handler für /tick
-async fn tick_task(State(state): State<AppState>, Form(input): Form<TickForm>) -> StatusCode {
+async fn tick_task(State(state): State<AppState>, Form(input): Form<TickForm>) -> Redirect {
     let mut todos = state.todos.lock().unwrap();
     if let Some(task) = todos.iter_mut().find(|t| t.id == input.task_id) {
-        task.tick(); // `ToDo::tick` aufrufen
-        StatusCode::OK
-    } else {
-        StatusCode::NOT_FOUND
+        task.tick();
     }
+
+    Redirect::to("/")
+}
+
+async fn new_task(State(state): State<AppState>, Form(input): Form<ChangeTaskForm>) -> Redirect {
+    let mut todos = state.todos.lock().unwrap();
+    let new_todo: ToDo = ToDo::new(
+        state.generate_id(),
+        input.task_title,
+        input.task_description,
+        false,
+    );
+    println!(
+        "ID: {}\nTitel: {}",
+        new_todo.id, new_todo.title
+    );
+    todos.insert(0, new_todo);
+    Redirect::to("/")
 }
 
 // ToDo-Struct
@@ -86,8 +111,25 @@ impl ToDo {
     }
 }
 
-// AppState-Struct
 #[derive(Clone)]
 struct AppState {
     todos: Arc<Mutex<Vec<ToDo>>>,
+    next_id: Arc<Mutex<u32>>,
+}
+
+#[allow(dead_code)]
+impl AppState {
+    fn new() -> Self {
+        AppState {
+            todos: Arc::new(Mutex::new(Vec::new())),
+            next_id: Arc::new(Mutex::new(1)),
+        }
+    }
+
+    fn generate_id(&self) -> u32 {
+        let mut id = self.next_id.lock().unwrap();
+        let current_id = *id;
+        *id += 1;
+        current_id
+    }
 }
