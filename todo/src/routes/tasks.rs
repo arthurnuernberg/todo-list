@@ -4,7 +4,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tera::{Context, Tera};
@@ -40,6 +40,17 @@ pub fn routes() -> Router {
 async fn tasks(State(state): State<AppState>) -> Html<String> {
     let todos = state.todos.lock().unwrap(); // Zugriff auf die gemeinsam genutzte ToDo-Liste
     let title = state.title.lock().unwrap();
+    let now_string = {
+        let now = Local::now();
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}",
+            now.year(),
+            now.month(),
+            now.day(),
+            now.hour(),
+            now.minute(),
+        )
+    };
 
     // Tera-Instanz erstellen
     let tera = Tera::new("src/templates/**/*").unwrap();
@@ -49,6 +60,7 @@ async fn tasks(State(state): State<AppState>) -> Html<String> {
 
     context.insert("tasks", &*todos);
     context.insert("title", &*title);
+    context.insert("now_string", &now_string);
 
     // Template rendern
     let rendered = tera.render("tasks.html", &context).unwrap();
@@ -75,7 +87,7 @@ struct TitleUpdate {
 #[derive(Deserialize)]
 struct DueDateUpdate {
     task_id: u32,
-    due_date: DateTime<Local>,
+    due_date: String,
 }
 
 // POST-Handler für /tick
@@ -122,9 +134,17 @@ async fn update_due_date(
     State(state): State<AppState>,
     Form(input): Form<DueDateUpdate>,
 ) -> Redirect {
-    let mut todos = state.todos.lock().unwrap();
-    if let Some(task) = todos.iter_mut().find(|t| t.id == input.task_id) {
-        task.due_date = Some(input.due_date);
+    // Versuch manuelles Parsen
+    use chrono::{Local, NaiveDateTime};
+
+    let naive_dt = NaiveDateTime::parse_from_str(&input.due_date, "%Y-%m-%dT%H:%M");
+    if let Ok(dt) = naive_dt {
+        let local_dt = Local.from_local_datetime(&dt).unwrap();
+
+        let mut todos = state.todos.lock().unwrap();
+        if let Some(task) = todos.iter_mut().find(|t| t.id == input.task_id) {
+            task.due_date = Some(local_dt);
+        }
     }
     Redirect::to("/")
 }
