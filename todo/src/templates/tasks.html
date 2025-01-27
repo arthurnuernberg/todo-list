@@ -1,18 +1,32 @@
 <!DOCTYPE html>
+<!--suppress HtmlFormInputWithoutLabel -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>To-Dos</title>
     <style>
+
         body {
-            font-family: "Roboto", Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column; /* Elemente von oben nach unten anordnen */
+            align-items: center; /* Horizontal zentrieren */
+            margin: 0 auto; /* Automatische horizontale Zentrierung */
+            width: 80%; /* Breite auf 80% des Viewports beschränken */
+            min-height: 100vh; /* Body mindestens so hoch wie der Viewport */
         }
 
+        /* Falls du nicht willst, dass due-date-wrapper extra rechts ist, entferne margin: 0 0 0 auto */
         .due-date-wrapper {
-            position: relative; /* Damit .due-date-form absolut positioniert werden kann */
-            display: inline-block; /* Oder block, je nach Layoutwunsch */
-            padding: 10px 20px; /* Großzügige Innenabstände, damit man sicher "drüber" ist */
-            margin: 0 0 0 auto; /* Beispiel: nach rechts schieben (optional) */
+            position: relative;
+            display: block;
+            padding: 10px 20px;
+        }
+
+        .hover-trigger {
+            display: inline-block;
+            position: relative;
+            cursor: pointer;
+            padding: 4px 8px;
         }
 
         /* Der Text, der immer zu sehen ist */
@@ -27,15 +41,18 @@
 
         /* Das eigentlich versteckte Formular */
         .due-date-form {
+            min-width: unset;
+            width: max-content;
+            top: 100%;
+            left: 0;
+            margin-top: -10px;
             display: none; /* Unsichtbar, bis Hover */
             position: absolute; /* Überlagert den Inhalt */
-            top: 100%; /* Direkt unterhalb der Wrapper-Box */
             right: 0; /* Am rechten Rand ausrichten */
             background-color: #fff; /* Weißer Hintergrund */
             border: 1px solid #ccc;
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
             padding: 8px;
-            min-width: 200px;
             z-index: 999;
         }
 
@@ -57,12 +74,26 @@
         .due-date-wrapper:hover .due-date-form {
             display: block;
         }
+
+        /* Standardzustand: kein Rahmen, Element als inline-block */
+        h1[contenteditable="true"] {
+            display: inline-block;
+            border: 1px dashed transparent; /* Unsichtbarer Rahmen als Platzhalter */
+            padding: 4px;
+            margin: 0;
+        }
+
+        /* Wenn der Nutzer den Inhalt bearbeitet (Fokus), zeigen wir einen sichtbaren Rahmen */
+        h1[contenteditable="true"]:focus {
+            outline: none; /* Standard-Fokus-Rahmen ausschalten */
+            border-color: #ccc; /* Rahmen in Hellgrau */
+        }
     </style>
     <link
             href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
             rel="stylesheet">
 </head>
-<body style="font-family: Arial, sans-serif; margin: 40px;">
+<body style="font-family: Arial, sans-serif; margin-top: 40px;">
 
 <!-- Veränderbare Unterschrift -->
 <h1
@@ -70,32 +101,14 @@
         class="editable"
         contenteditable="true"
         onblur="saveTitle()"
+
 >
     {{ title }}
 </h1>
-<script>
-    async function saveTitle() {
-        const titleElement = document.getElementById('editable-title');
-        const newTitle = titleElement.textContent.trim();
-
-        // Sende die neue Überschrift an das Backend
-        const response = await fetch('/update_title', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({title: newTitle}),
-        });
-
-        if (!response.ok) {
-            alert('Fehler beim Speichern der Überschrift.');
-        }
-    }
-</script>
-
-<ul style="list-style-type: none; padding: 0;">
+<ul style="list-style-type: none; min-width: 70%; padding: 0;">
     {% for task in tasks %}
-    <li style="border-bottom: 1px solid #ccc; padding: 10px 0;">
+    <li style="border-bottom: 1px solid #ccc; padding: 10px 0;"
+        class="{% if task.is_overdue and not task.completed %}overdue{% endif %}">
         <div
                 style="
       display: grid;
@@ -114,20 +127,24 @@
                             {% if task.completed %}checked{% endif %}
                     >
                 </form>
-                <strong>{{ task.title }}</strong>
+                <strong id="editable-name"
+                        class="editable"
+                        contenteditable="true"
+                        onblur="saveName()"
+                >{{ task.title }}</strong>
             </div>
 
             <!-- Mittlere Spalte: Fälligkeitsdatum + Datumswähler -->
             <div class="due-date-wrapper">
-                <!-- Angezeigter Text/Info zum Datum -->
+                <!-- Angezeigter Text zum Datum -->
                 {% if task.due_date %}
-                <span class="due-date-label">
-      Fällig: {{ task.due_date | date(format="%d.%m.%Y %H:%M") }}
-    </span>
+                <span class="due-date-label {% if task.is_overdue %}overdue{% endif %} hover-trigger">
+    Fällig: {{ task.due_date | date(format="%d.%m.%Y %H:%M") }}
+  </span>
                 {% else %}
-                <span class="due-date-label no-date">
-      Kein Fälligkeitsdatum
-    </span>
+                <span class="due-date-label no-date hover-trigger">
+    Kein Fälligkeitsdatum
+  </span>
                 {% endif %}
 
                 <!-- Ausklappbares Datums-Formular -->
@@ -144,7 +161,7 @@
         <!-- Rechte Spalte: Lösch-Button -->
         <div style="text-align: right;">
             <form method="POST" action="/delete_task" style="display: inline;">
-                <input type="hidden" name="task_id">
+                <input type="hidden" name="task_id" value="{{ task.id }}">
                 <button
                         type="submit"
                         style="
@@ -175,7 +192,7 @@
 
         <!-- Beschreibung in kleinerer Schrift, falls vorhanden -->
         {% if task.description %}
-        <p style="margin: 5px 0 0; font-size: 0.85rem; color: #666;">
+        <p style="margin: 5px 0 0; font-size: 0.85rem; color: #666;" id=editable-description">
             {{ task.description }}
         </p>
         {% endif %}
@@ -196,5 +213,40 @@
         Hinzufügen
     </button>
 </form>
+<script>
+    async function saveTitle() {
+        const titleElement = document.getElementById('editable-title');
+        const newTitle = titleElement.textContent.trim();
+
+        // Sende die neue Überschrift an das Backend
+        const response = await fetch('/update_title', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({title: newTitle}),
+        });
+
+        if (!response.ok) {
+            alert('Fehler beim Speichern der Überschrift.');
+        }
+    }
+
+    async function changeNameAndTitle() {
+        const name = document.getElementById('editable-name');
+        const newName = name.textContent.trim();
+        const description = document.getElementById('editable-description');
+        const newDescription = description.textContent.trim();
+        const taskId = document.getElementById('editable-task-id');
+
+        await fetch('/update_name', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({title: newName, description: newDescription, task_id: taskId}),
+        });
+    }
+</script>
 </body>
 </html>

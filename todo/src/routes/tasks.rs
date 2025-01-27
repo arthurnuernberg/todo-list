@@ -38,7 +38,10 @@ pub fn routes() -> Router {
 }
 
 async fn tasks(State(state): State<AppState>) -> Html<String> {
-    let todos = state.todos.lock().unwrap(); // Zugriff auf die gemeinsam genutzte ToDo-Liste
+    let mut todos = state.todos.lock().unwrap(); // Zugriff auf die gemeinsam genutzte ToDo-Liste
+    todos.iter_mut().for_each(|todo| {
+        todo.check_overdue();
+    });
     let title = state.title.lock().unwrap();
     let now_string = {
         let now = Local::now();
@@ -130,6 +133,10 @@ async fn update_title(State(state): State<AppState>, Json(payload): Json<TitleUp
     Redirect::to("/")
 }
 
+/*async fn update_name(State(state): State<AppState>, Json(payload): Json<NameUpdate> -> Redirect {
+    let mut name = state.
+}*/
+
 async fn update_due_date(
     State(state): State<AppState>,
     Form(input): Form<DueDateUpdate>,
@@ -158,6 +165,7 @@ pub struct ToDo {
     due_date: Option<DateTime<Local>>, // Fälligkeitsdatum
     created_at: DateTime<Local>,       // Erstellungsdatum
     completed: bool,
+    is_overdue: bool,
 }
 
 impl ToDo {
@@ -169,12 +177,20 @@ impl ToDo {
             due_date: None,
             created_at: Local::now(),
             completed,
+            is_overdue: false,
         }
     }
 
     fn tick(&mut self) -> &ToDo {
         self.completed = !self.completed;
         self
+    }
+
+    fn check_overdue(&mut self) {
+        self.is_overdue = match self.due_date {
+            Some(d) => d <= Local::now(),
+            None => false,
+        }
     }
 }
 
