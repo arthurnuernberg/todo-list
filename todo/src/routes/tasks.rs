@@ -1,9 +1,11 @@
+use axum::extract::Query;
 use axum::{
     extract::{Form, State},
     response::{Html, Redirect},
     routing::{get, post},
     Json, Router,
 };
+use chrono::NaiveDateTime;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -37,7 +39,61 @@ pub fn routes() -> Router {
         .with_state(app_state) // AppState hier binden
 }
 
-async fn tasks(State(state): State<AppState>) -> Html<String> {
+#[derive(Debug, Deserialize)]
+pub struct AllFilters {
+    #[serde(deserialize_with = "deserialize_optional_bool")]
+    #[serde(default)]
+    pub completed: Option<bool>,
+
+    #[serde(deserialize_with = "deserialize_optional_bool")]
+    #[serde(default)]
+    pub is_due: Option<bool>,
+
+    #[serde(deserialize_with = "deserialize_optional_datetime")]
+    #[serde(default)]
+    pub start_date: Option<NaiveDateTime>,
+
+    #[serde(deserialize_with = "deserialize_optional_datetime")]
+    #[serde(default)]
+    pub end_date: Option<NaiveDateTime>,
+
+    #[serde(default)]
+    pub query: Option<String>,
+}
+
+fn deserialize_optional_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s: Option<String> = Option::deserialize(deserializer)?;
+    match s.as_deref() {
+        Some("true") => Ok(Some(true)),
+        Some("false") => Ok(Some(false)),
+        Some("") | None => Ok(None),
+        _ => Err(serde::de::Error::custom(
+            "Invalid boolean value, expected 'true' or 'false'",
+        )),
+    }
+}
+
+fn deserialize_optional_datetime<'de, D>(deserializer: D) -> Result<Option<NaiveDateTime>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s: Option<String> = Option::deserialize(deserializer)?;
+    if let Some(s) = s {
+        if s.is_empty() {
+            return Ok(None);
+        }
+        NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M")
+            .map(Some)
+            .map_err(serde::de::Error::custom)
+    } else {
+        Ok(None)
+    }
+}
+
+async fn tasks(State(state): State<AppState>, Query(filters): Query<AllFilters>) -> Html<String> {
     let mut todos = state.todos.lock().unwrap(); // Zugriff auf die gemeinsam genutzte ToDo-Liste
     todos.iter_mut().for_each(|todo| {
         todo.check_overdue();
@@ -55,19 +111,67 @@ async fn tasks(State(state): State<AppState>) -> Html<String> {
         )
     };
 
+    let mut filtered_todos = todos.clone();
+
+    if let Some(completed) = filters.completed {
+        filtered_todos = filtered_todos
+            .into_iter()
+            .filter(|todo| todo.completed == completed)
+            .collect();
+    }
+
+    if let (Some(start), Some(end)) = (filters.start_date, filters.end_date) {
+        filtered_todos = filter_by_date_range(&filtered_todos, Some(start), Some(end));
+    }
+
+    if let Some(query) = &filters.query {
+        filtered_todos = filtered_todos
+            .into_iter()
+            .filter(|todo| todo.title.to_lowercase().contains(&query.to_lowercase()))
+            .collect();
+    }
+
+    if let Some(true) = filters.is_due {
+        filtered_todos = filtered_todos
+            .into_iter()
+            .filter(|todo| todo.due_date.map(|d| d <= Local::now()).unwrap_or(false))
+            .collect();
+    }
+
     // Tera-Instanz erstellen
     let tera = Tera::new("src/templates/**/*").unwrap();
 
     // Kontext erstellen und Daten hinzufügen
     let mut context = Context::new();
 
-    context.insert("tasks", &*todos);
+    context.insert("tasks", &*filtered_todos);
     context.insert("title", &*title);
     context.insert("now_string", &now_string);
 
     // Template rendern
     let rendered = tera.render("tasks.html", &context).unwrap();
     Html(rendered)
+}
+
+fn filter_by_date_range(
+    todos: &Vec<ToDo>,
+    start_date: Option<NaiveDateTime>,
+    end_date: Option<NaiveDateTime>,
+) -> Vec<ToDo> {
+    todos
+        .iter()
+        .filter(|todo| {
+            if let Some(start) = start_date {
+                if let Some(end) = end_date {
+                    if let Some(due_date) = todo.due_date {
+                        return due_date.naive_local() >= start && due_date.naive_local() <= end;
+                    }
+                }
+            }
+            false
+        })
+        .cloned()
+        .collect()
 }
 
 // Form-Daten
