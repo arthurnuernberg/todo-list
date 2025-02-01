@@ -36,6 +36,7 @@ pub fn routes() -> Router {
         .route("/delete_task", post(delete_task))
         .route("/update_title", post(update_title))
         .route("/update_date", post(update_due_date))
+        .route("/update_task", post(update_task))
         .with_state(app_state) // AppState hier binden
 }
 
@@ -182,8 +183,9 @@ struct TaskForm {
 
 #[derive(Deserialize)]
 struct ChangeTaskForm {
+    task_id: u32,
     task_title: String,
-    task_description: Option<String>,
+    task_description: String,
 }
 
 #[derive(Deserialize)]
@@ -212,12 +214,12 @@ async fn new_task(State(state): State<AppState>, Form(input): Form<ChangeTaskFor
     if input.task_title.is_empty() {
         return Redirect::to("/");
     }
-    let new_todo: ToDo = ToDo::new(
-        state.generate_id(),
-        input.task_title,
-        input.task_description,
-        false,
-    );
+    let mut description: Option<String> = None;
+    if !input.task_description.is_empty() {
+        description = Some(input.task_description)
+    };
+
+    let new_todo: ToDo = ToDo::new(state.generate_id(), input.task_title, description, false);
     println!("ID: {}\nTitel: {}", new_todo.id, new_todo.title);
     todos.insert(0, new_todo);
     Redirect::to("/")
@@ -233,13 +235,35 @@ async fn delete_task(State(state): State<AppState>, form: Form<TaskForm>) -> Red
 
 async fn update_title(State(state): State<AppState>, Json(payload): Json<TitleUpdate>) -> Redirect {
     let mut title = state.title.lock().unwrap();
-    *title = payload.title;
+    if !payload.title.is_empty() {
+        *title = payload.title;
+    }
     Redirect::to("/")
 }
 
-/*async fn update_name(State(state): State<AppState>, Json(payload): Json<NameUpdate> -> Redirect {
-    let mut name = state.
-}*/
+async fn update_task(
+    State(state): State<AppState>,
+    Json(payload): Json<ChangeTaskForm>,
+) -> Redirect {
+    let mut todos = state.todos.lock().unwrap();
+    if let Some(task) = todos.iter_mut().find(|t| t.id == payload.task_id) {
+        task.title = {
+            if !payload.task_title.is_empty() {
+                payload.task_title
+            } else {
+                task.title.clone()
+            }
+        };
+        task.description = {
+            if payload.task_description.is_empty() {
+                None
+            } else {
+                Some(payload.task_description)
+            }
+        };
+    }
+    Redirect::to("/")
+}
 
 async fn update_due_date(
     State(state): State<AppState>,

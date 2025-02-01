@@ -118,7 +118,80 @@
         .filter-button:hover {
             background: #45a049;
         }
+
+        .text-box {
+            display: inline-block;
+            margin: 5px 0 0;
+            width: auto;
+            min-width: 100px;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            border: 1pt dashed transparent;
+        }
+
+        .text-box:focus {
+            outline: none;
+            border-color: #ccc;
+        }
+
+        .name {
+            max-width: 90%;
+            border: 1px dashed transparent;
+        }
+
+        .description {
+            font-size: 0.85rem;
+            color: #666;
+            max-width: 90%;
+        }
     </style>
+    <script>
+        async function saveTitle() {
+            const titleElement = document.getElementById('editable-title');
+            const newTitle = titleElement.textContent.trim();
+
+            if (newTitle === '') {
+                alert('Der Titel darf nicht leer sein.');
+                titleElement.textContent = '{{ title }}';
+                return;
+            }
+            const response = await fetch('/update_title', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({title: newTitle}),
+            });
+
+            if (!response.ok) {
+                alert('Fehler beim Speichern der Überschrift.');
+            }
+        }
+
+
+        async function changeNameOrDescription(taskId) {
+            let nameElement = document.getElementById(`title-${taskId}`);
+            const name = document.getElementById(`title-${taskId}`).textContent.trim();
+            const description = document.getElementById(`description-${taskId}`).textContent.trim();
+
+            if (name === '') {
+                alert('Der Titel darf nicht leer sein.');
+                nameElement.textContent = nameElement.dataset.originalValue;
+            } else {
+                await fetch('/update_task', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        task_id: taskId,
+                        task_title: name,
+                        task_description: description
+                    }),
+                });
+            }
+        }
+    </script>
     <link
             href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
             rel="stylesheet">
@@ -181,7 +254,7 @@
         <i class="fas fa-filter"></i> Filtern
     </button>
 </form>
-<ul style="list-style-type: none; min-width: 70%; padding: 0;">
+<ul style="list-style-type: none; min-width: 70%; padding: 0; max-width: 70%;">
     {% for task in tasks %}
     <li style="border-bottom: 1px solid #ccc; padding: 10px 0;"
         class="{% if task.is_overdue and not task.completed %}overdue{% endif %}">
@@ -205,10 +278,12 @@
                             {% endif %}
                     >
                 </form>
-                <strong id="editable-name"
-                        class="editable"
+                <strong id="title-{{ task.id }}"
+                        class="editable text-box name"
+                        data-task-id="{{ task.id }}"
                         contenteditable="true"
-                        onblur="saveName()"
+                        onblur="changeNameOrDescription({{ task.id }})"
+                        onfocus="this.dataset.originalValue = this.textContent"
                 >{{ task.title }}</strong>
             </div>
 
@@ -270,11 +345,13 @@
         </div>
 
         <!-- Beschreibung in kleinerer Schrift, falls vorhanden -->
-        {% if task.description %}
-        <p style="margin: 5px 0 0; font-size: 0.85rem; color: #666;" id=editable-description">
+        <p class="text-box description"
+           id="description-{{ task.id }}"
+           data-task-id="{{ task.id }}" onblur="changeNameOrDescription({{ task.id }})" contenteditable="true">
+            {% if task.description %}
             {{ task.description }}
+            {% endif %}
         </p>
-        {% endif %}
     </li>
     {% endfor %}
 </ul>
@@ -292,55 +369,5 @@
         Hinzufügen
     </button>
 </form>
-<script>
-    async function saveTitle() {
-        const titleElement = document.getElementById('editable-title');
-        const newTitle = titleElement.textContent.trim();
-
-        // Sende die neue Überschrift an das Backend
-        const response = await fetch('/update_title', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({title: newTitle}),
-        });
-
-        if (!response.ok) {
-            alert('Fehler beim Speichern der Überschrift.');
-        }
-    }
-
-    async function changeNameAndTitle() {
-        const name = document.getElementById('editable-name');
-        const newName = name.textContent.trim();
-        const description = document.getElementById('editable-description');
-        const newDescription = description.textContent.trim();
-        const taskId = document.getElementById('editable-task-id');
-
-        await fetch('/update_name', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({title: newName, description: newDescription, task_id: taskId}),
-        });
-    }
-
-    document.getElementById('filterForm').addEventListener('submit', function (e) {
-        // Entferne leere Parameter vor dem Absenden
-        const formData = new FormData(this);
-        const params = new URLSearchParams();
-
-        for (const [key, value] of formData.entries()) {
-            if (value !== '') {
-                params.append(key, value);
-            }
-        }
-
-        window.location = `${this.action}?${params.toString()}`;
-        e.preventDefault();
-    });
-</script>
 </body>
 </html>
