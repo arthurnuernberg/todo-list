@@ -7,7 +7,8 @@ use axum::{
 };
 use chrono::NaiveDateTime;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use tera::{Context, Tera};
 
@@ -27,6 +28,7 @@ pub fn routes() -> Router {
         todos,
         next_id: Arc::new(Mutex::new(4)),
         title: Arc::new(Mutex::new(String::from("To-dos"))),
+        tags: Arc::new(Mutex::new(HashSet::new())),
     };
 
     Router::new()
@@ -60,18 +62,21 @@ pub struct AllFilters {
 
     #[serde(default)]
     pub query: Option<String>,
+
+    #[serde(default, deserialize_with = "deserialize_comma_separated")]
+    pub tags: Vec<String>,
 }
 
 fn deserialize_optional_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
 where
-    D: serde::Deserializer<'de>,
+    D: Deserializer<'de>,
 {
     let s: Option<String> = Option::deserialize(deserializer)?;
     match s.as_deref() {
         Some("true") => Ok(Some(true)),
         Some("false") => Ok(Some(false)),
         Some("") | None => Ok(None),
-        _ => Err(serde::de::Error::custom(
+        _ => Err(de::Error::custom(
             "Invalid boolean value, expected 'true' or 'false'",
         )),
     }
@@ -79,7 +84,7 @@ where
 
 fn deserialize_optional_datetime<'de, D>(deserializer: D) -> Result<Option<NaiveDateTime>, D::Error>
 where
-    D: serde::Deserializer<'de>,
+    D: Deserializer<'de>,
 {
     let s: Option<String> = Option::deserialize(deserializer)?;
     if let Some(s) = s {
@@ -88,9 +93,24 @@ where
         }
         NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M")
             .map(Some)
-            .map_err(serde::de::Error::custom)
+            .map_err(de::Error::custom)
     } else {
         Ok(None)
+    }
+}
+
+fn deserialize_comma_separated<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: Option<String> = Option::deserialize(deserializer)?;
+    if let Some(s) = s {
+        Ok(s.split(',')
+            .map(|item| item.trim().to_string())
+            .filter(|item| !item.is_empty())
+            .collect())
+    } else {
+        Ok(Vec::new())
     }
 }
 
@@ -100,6 +120,7 @@ async fn tasks(State(state): State<AppState>, Query(filters): Query<AllFilters>)
         todo.check_overdue();
     });
     let title = state.title.lock().unwrap();
+    let tags = state.tags.lock().unwrap();
     let now_string = {
         let now = Local::now();
         format!(
@@ -139,6 +160,10 @@ async fn tasks(State(state): State<AppState>, Query(filters): Query<AllFilters>)
             .collect();
     }
 
+    if !&filters.tags.is_empty() {
+        filtered_todos = filter_by_tags(&filtered_todos, &tags);
+    }
+
     // Tera-Instanz erstellen
     let tera = Tera::new("src/templates/**/*").unwrap();
 
@@ -148,6 +173,7 @@ async fn tasks(State(state): State<AppState>, Query(filters): Query<AllFilters>)
     context.insert("tasks", &*filtered_todos);
     context.insert("title", &*title);
     context.insert("now_string", &now_string);
+    context.insert("tags", &*tags);
 
     // Template rendern
     let rendered = tera.render("tasks.html", &context).unwrap();
@@ -175,6 +201,19 @@ fn filter_by_date_range(
         .collect()
 }
 
+#[allow(dead_code)]
+fn filter_by_tags(todos: &Vec<ToDo>, tags: &HashSet<Tag>) -> Vec<ToDo> {
+    todos
+        .iter()
+        .filter(|todo| {
+            todo.tags
+                .iter()
+                .any(|tag| tags.iter().any(|t| t.name == tag.name))
+        })
+        .cloned()
+        .collect()
+}
+
 // Form-Daten
 #[derive(Deserialize)]
 struct TaskForm {
@@ -186,6 +225,12 @@ struct ChangeTaskForm {
     task_id: u32,
     task_title: String,
     task_description: String,
+    tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct NewTaskForm {
+    task_title: String,
 }
 
 #[derive(Deserialize)]
@@ -209,17 +254,13 @@ async fn tick_task(State(state): State<AppState>, Form(input): Form<TaskForm>) -
     Redirect::to("/")
 }
 
-async fn new_task(State(state): State<AppState>, Form(input): Form<ChangeTaskForm>) -> Redirect {
+async fn new_task(State(state): State<AppState>, Form(input): Form<NewTaskForm>) -> Redirect {
     let mut todos = state.todos.lock().unwrap();
     if input.task_title.is_empty() {
         return Redirect::to("/");
     }
-    let mut description: Option<String> = None;
-    if !input.task_description.is_empty() {
-        description = Some(input.task_description)
-    };
-
-    let new_todo: ToDo = ToDo::new(state.generate_id(), input.task_title, description, false);
+    
+    let new_todo: ToDo = ToDo::new(state.generate_id(), input.task_title, None, false);
     println!("ID: {}\nTitel: {}", new_todo.id, new_todo.title);
     todos.insert(0, new_todo);
     Redirect::to("/")
@@ -261,7 +302,24 @@ async fn update_task(
                 Some(payload.task_description)
             }
         };
+        task.tags = {
+            payload
+                .tags
+                .iter()
+                .map(|tag| Tag {
+                    name: tag.to_string(),
+                })
+                .collect()
+        };
     }
+    state.tags.lock().unwrap().clear();
+    state
+        .tags
+        .lock()
+        .unwrap()
+        .extend(payload.tags.iter().map(|tag| Tag {
+            name: tag.to_string(),
+        }));
     Redirect::to("/")
 }
 
@@ -294,8 +352,10 @@ pub struct ToDo {
     created_at: DateTime<Local>,       // Erstellungsdatum
     completed: bool,
     is_overdue: bool,
+    tags: HashSet<Tag>,
 }
 
+#[allow(dead_code)]
 impl ToDo {
     fn new(id: u32, title: String, description: Option<String>, completed: bool) -> Self {
         ToDo {
@@ -306,6 +366,7 @@ impl ToDo {
             created_at: Local::now(),
             completed,
             is_overdue: false,
+            tags: HashSet::new(),
         }
     }
 
@@ -320,6 +381,22 @@ impl ToDo {
             None => false,
         }
     }
+
+    fn add_tag(&mut self, state: State<AppState>, tag: &Tag) {
+        self.tags.insert(tag.clone());
+        state.tags.lock().unwrap().insert(Tag {
+            name: tag.name.to_string(),
+        });
+    }
+
+    fn get_tags(&self) -> &HashSet<Tag> {
+        &self.tags
+    }
+}
+
+#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Debug, Clone)]
+struct Tag {
+    name: String,
 }
 
 #[derive(Clone)]
@@ -327,6 +404,7 @@ struct AppState {
     todos: Arc<Mutex<Vec<ToDo>>>,
     next_id: Arc<Mutex<u32>>,
     title: Arc<Mutex<String>>,
+    tags: Arc<Mutex<HashSet<Tag>>>,
 }
 
 #[allow(dead_code)]
@@ -336,6 +414,7 @@ impl AppState {
             todos: Arc::new(Mutex::new(Vec::new())),
             next_id: Arc::new(Mutex::new(1)),
             title: Arc::new(Mutex::new(String::from("To-dos"))),
+            tags: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 

@@ -169,16 +169,50 @@
         }
 
 
-        async function changeNameOrDescription(taskId) {
-            let nameElement = document.getElementById(`title-${taskId}`);
-            const name = document.getElementById(`title-${taskId}`).textContent.trim();
-            const description = document.getElementById(`description-${taskId}`).textContent.trim();
+        function addTag(taskId) {
+            const taskContainer = document.getElementById(`task-${taskId}`);
+            const input = taskContainer.querySelector('.tag-add-wrapper .tag-input');
+            const newTagName = input.value.trim();
+            if (!newTagName) return;
+
+            // Erstelle ein neues Tag-Element
+            const newTagElement = document.createElement('div');
+            newTagElement.classList.add('tag-wrapper');
+            newTagElement.innerHTML = `
+      <span class="tags" contenteditable="true">${newTagName}</span>
+      <i class="fa-trash"></i>
+    `;
+
+            // Füge das neue Tag dem Tags-Wrapper hinzu
+            const tagsWrapper = taskContainer.querySelector('.tags-wrapper');
+            // Vor dem Eingabebereich einfügen:
+            const addWrapper = taskContainer.querySelector('.tag-add-wrapper');
+            tagsWrapper.insertBefore(newTagElement, addWrapper);
+
+            // Eingabefeld zurücksetzen
+            input.value = '';
+        }
+
+        // Aktualisierte updateTask-Funktion, die nun die Tags als Array von Strings übergibt
+        async function updateTask(taskId) {
+            const taskContainer = document.getElementById(`task-${taskId}`);
+            const titleElement = taskContainer.querySelector(`#title-${taskId}`);
+            const name = titleElement.textContent.trim();
+            const description = taskContainer.querySelector(`#description-${taskId}`).textContent.trim();
+
+            // Alle Elemente mit der Klasse 'tags' innerhalb des Task-Containers sammeln
+            const tags = Array.from(taskContainer.querySelectorAll('.tags'))
+                .map(tag => tag.textContent.trim())
+                .filter(tag => tag !== ''); // Leere Einträge herausfiltern
 
             if (name === '') {
                 alert('Der Titel darf nicht leer sein.');
-                nameElement.textContent = nameElement.dataset.originalValue;
-            } else {
-                await fetch('/update_task', {
+                titleElement.textContent = titleElement.dataset.originalValue;
+                return;
+            }
+
+            try {
+                const response = await fetch('/update_task', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -186,10 +220,30 @@
                     body: JSON.stringify({
                         task_id: taskId,
                         task_title: name,
-                        task_description: description
+                        task_description: description,
+                        tags: tags,
                     }),
                 });
+
+                if (!response.ok) {
+                    console.error('Fehler beim Aktualisieren der Task:', response.statusText);
+                }
+            } catch (error) {
+                console.error('Fehler beim Senden der Update-Anfrage:', error);
             }
+        }
+
+        async function removeTag(taskId, tagName) {
+            document.getElementById(`${taskId}-${tagName}`).remove();
+            await updateTask(taskId);
+        }
+
+        function updateTagsInput() {
+            const select = document.getElementById('tag-filter');
+            const selectedValues = Array.from(select.selectedOptions)
+                .map(option => option.value)
+                .filter(value => value.trim() !== '');
+            document.getElementById('tags').value = selectedValues.join(',');
         }
     </script>
     <link
@@ -250,6 +304,16 @@
                aria-label="Suchbegriff">
     </div>
 
+    <div class="filter-group">
+        <label for="tag-filter">Tags:</label>
+        <select id="tag-filter" name="tag-filter" multiple onchange="updateTagsInput()">
+            {% for tag in tags %}
+            <option value="{{ tag.name }}">{{tag.name}}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <input type="hidden" id="tags" name="tags">
+
     <button type="submit" class="filter-button">
         <i class="fas fa-filter"></i> Filtern
     </button>
@@ -258,66 +322,67 @@
     {% for task in tasks %}
     <li style="border-bottom: 1px solid #ccc; padding: 10px 0;"
         class="{% if task.is_overdue and not task.completed %}overdue{% endif %}">
-        <div
-                style="
+        <div class="task" id="task-{{ task.id }}">
+            <div
+                    style="
       display: grid;
       grid-template-columns: 2fr 1fr auto;
       align-items: center;
       column-gap: 1rem;
     "
-        >
-            <!-- Linke Spalte: Checkbox + Titel -->
-            <div style="display: flex; align-items: center;">
-                <form method="POST" action="/tick" style="display: inline; margin-right: 8px;">
-                    <input type="hidden" name="task_id" value="{{ task.id }}">
-                    <input
-                            type="checkbox"
-                            onchange="this.form.submit()"
-                            {% if task.completed %}
-                            checked
-                            {% endif %}
-                    >
-                </form>
-                <strong id="title-{{ task.id }}"
-                        class="editable text-box name"
-                        data-task-id="{{ task.id }}"
-                        contenteditable="true"
-                        onblur="changeNameOrDescription({{ task.id }})"
-                        onfocus="this.dataset.originalValue = this.textContent"
-                >{{ task.title }}</strong>
-            </div>
+            >
+                <!-- Linke Spalte: Checkbox + Titel -->
+                <div style="display: flex; align-items: center;">
+                    <form method="POST" action="/tick" style="display: inline; margin-right: 8px;">
+                        <input type="hidden" name="task_id" value="{{ task.id }}">
+                        <input
+                                type="checkbox"
+                                onchange="this.form.submit()"
+                                {% if task.completed %}
+                                checked
+                                {% endif %}
+                        >
+                    </form>
+                    <strong id="title-{{ task.id }}"
+                            class="editable text-box name"
+                            data-task-id="{{ task.id }}"
+                            contenteditable="true"
+                            onblur="updateTask({{ task.id }})"
+                            onfocus="this.dataset.originalValue = this.textContent"
+                    >{{ task.title }}</strong>
+                </div>
 
-            <!-- Mittlere Spalte: Fälligkeitsdatum + Datumswähler -->
-            <div class="due-date-wrapper">
-                <!-- Angezeigter Text zum Datum -->
-                {% if task.due_date %}
-                <span class="due-date-label {% if task.is_overdue %}overdue{% endif %} hover-trigger">
+                <!-- Mittlere Spalte: Fälligkeitsdatum + Datumswähler -->
+                <div class="due-date-wrapper">
+                    <!-- Angezeigter Text zum Datum -->
+                    {% if task.due_date %}
+                    <span class="due-date-label {% if task.is_overdue %}overdue{% endif %} hover-trigger">
     Fällig: {{ task.due_date | date(format="%d.%m.%Y %H:%M") }}
   </span>
-                {% else %}
-                <span class="due-date-label no-date hover-trigger">
+                    {% else %}
+                    <span class="due-date-label no-date hover-trigger">
     Kein Fälligkeitsdatum
   </span>
-                {% endif %}
+                    {% endif %}
 
-                <!-- Ausklappbares Datums-Formular -->
-                <div class="due-date-form">
-                    <form method="POST" action="/update_date">
-                        <input type="hidden" name="task_id" value="{{ task.id }}">
-                        <input type="datetime-local" name="due_date">
-                        <button type="submit">Speichern</button>
-                    </form>
+                    <!-- Ausklappbares Datums-Formular -->
+                    <div class="due-date-form">
+                        <form method="POST" action="/update_date">
+                            <input type="hidden" name="task_id" value="{{ task.id }}">
+                            <input type="datetime-local" name="due_date">
+                            <button type="submit">Speichern</button>
+                        </form>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Rechte Spalte: Lösch-Button -->
-        <div style="text-align: right;">
-            <form method="POST" action="/delete_task" style="display: inline;">
-                <input type="hidden" name="task_id" value="{{ task.id }}">
-                <button
-                        type="submit"
-                        style="
+            <!-- Rechte Spalte: Lösch-Button -->
+            <div style="text-align: right;">
+                <form method="POST" action="/delete_task" style="display: inline;">
+                    <input type="hidden" name="task_id" value="{{ task.id }}">
+                    <button
+                            type="submit"
+                            style="
             min-width: auto;
             background-color: #e74c3c;
             color: #fff;
@@ -328,30 +393,56 @@
             font-weight: bold;
             transition: background-color 0.2s ease;
           "
-                        onmouseover="this.style.backgroundColor='#c0392b';"
-                        onmouseout="this.style.backgroundColor='#e74c3c';"
-                >
-                    <i
-                            class="fas fa-trash"
-                            style="
+                            onmouseover="this.style.backgroundColor='#c0392b';"
+                            onmouseout="this.style.backgroundColor='#e74c3c';"
+                    >
+                        <i
+                                class="fas fa-trash"
+                                style="
               font-size: 18px;
               color: #ffffff;
               transition: color 0.2s ease;"
-                            onmouseover="this.style.color='#a5a5a5';"
-                            onmouseout="this.style.color='#ffffff';"
-                    ></i>
-                </button>
-            </form>
-        </div>
+                                onmouseover="this.style.color='#a5a5a5';"
+                                onmouseout="this.style.color='#ffffff';"
+                        ></i>
+                    </button>
+                </form>
+            </div>
 
-        <!-- Beschreibung in kleinerer Schrift, falls vorhanden -->
-        <p class="text-box description"
-           id="description-{{ task.id }}"
-           data-task-id="{{ task.id }}" onblur="changeNameOrDescription({{ task.id }})" contenteditable="true">
-            {% if task.description %}
-            {{ task.description }}
-            {% endif %}
-        </p>
+            <!-- Beschreibung in kleinerer Schrift, falls vorhanden -->
+            <p class="text-box description"
+               id="description-{{ task.id }}"
+               data-task-id="{{ task.id }}" onblur="updateTask({{ task.id }})" contenteditable="true">
+                {% if task.description %}
+                {{ task.description }}
+                {% endif %}
+            </p>
+
+            <!-- Tag Container -->
+            <div class="tags-wrapper">
+                {% for tag in task.tags %}
+                <div class="tag-wrapper" id="{{task.id}}-{{ tag.name }}">
+                    <span class="tags" contenteditable="true">{{ tag.name }}</span>
+                    <i class="fa fa-trash" onclick="removeTag({{ task.id }}, '{{ tag.name }}')"></i>
+                </div>
+                {% endfor %}
+
+                <!-- Bereich zum Hinzufügen eines neuen Tags -->
+                <div class="tag-add-wrapper">
+                    <input type="text" class="tag-input" placeholder="Neuen Tag hinzufügen..."
+                           list="existing-tags-{{ task.id }}">
+                    <datalist id="existing-tags-{{ task.id }}">
+                        {% for tag in tags %}
+                        <option value="{{ tag.name }}">
+                            {% endfor %}
+                    </datalist>
+                    <button type="button" onclick="addTag({{ task.id }})">Tag hinzufügen</button>
+                </div>
+            </div>
+
+            <!-- Button zum Aktualisieren der Task -->
+            <button type="button" onclick="updateTask({{ task.id }})">Task aktualisieren</button>
+        </div>
     </li>
     {% endfor %}
 </ul>
