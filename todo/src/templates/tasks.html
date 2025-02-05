@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!--suppress HtmlFormInputWithoutLabel -->
+<!--suppress HtmlFormInputWithoutLabel, HtmlUnknownAttribute -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -144,8 +144,36 @@
             color: #666;
             max-width: 90%;
         }
+
+        .delete-button {
+            min-width: auto;
+            background-color: #e74c3c;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 10px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.2s ease;
+        }
     </style>
     <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const input = document.getElementById('task_title');
+            const addButton = document.getElementById('addTaskButton');
+
+            input.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    newTask(input.value);
+                }
+            });
+
+            addButton.addEventListener('click', function () {
+                newTask(input.value);
+            });
+        });
+
         async function saveTitle() {
             const titleElement = document.getElementById('editable-title');
             const newTitle = titleElement.textContent.trim();
@@ -155,7 +183,7 @@
                 titleElement.textContent = '{{ title }}';
                 return;
             }
-            const response = await fetch('/update_title', {
+            const response = await fetch('/update_list_title', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -167,7 +195,6 @@
                 alert('Fehler beim Speichern der Überschrift.');
             }
         }
-
 
         function addTag(taskId) {
             const taskContainer = document.getElementById(`task-${taskId}`);
@@ -193,7 +220,6 @@
             input.value = '';
         }
 
-        // Aktualisierte updateTask-Funktion, die nun die Tags als Array von Strings übergibt
         async function updateTask(taskId) {
             const taskContainer = document.getElementById(`task-${taskId}`);
             const titleElement = taskContainer.querySelector(`#title-${taskId}`);
@@ -245,6 +271,29 @@
                 .filter(value => value.trim() !== '');
             document.getElementById('tags').value = selectedValues.join(',');
         }
+
+        async function newTask(name) {
+            try {
+                const response = await fetch('/new_task', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        task_title: name,
+                    }),
+                })
+
+                if (!response.ok) {
+                    console.error('Fehler beim Erstellen des To-dos:', response.statusText);
+                }
+                {
+                    window.location.reload();
+                }
+            } catch (error) {
+                console.error('Fehler beim Senden der Anfrage:', error);
+            }
+        }
     </script>
     <link
             href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
@@ -256,10 +305,10 @@
         class="editable"
         contenteditable="true"
         onblur="saveTitle()"
-
 >
     {{ title }}
 </h1>
+
 <form method="GET" action="/" class="filter-form">
     <div class="filter-group">
         <label for="completed">Status:</label>
@@ -382,26 +431,13 @@
                     <input type="hidden" name="task_id" value="{{ task.id }}">
                     <button
                             type="submit"
-                            style="
-            min-width: auto;
-            background-color: #e74c3c;
-            color: #fff;
-            border: none;
-            border-radius: 4px;
-            padding: 8px 10px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: background-color 0.2s ease;
-          "
+                            class="delete-button"
                             onmouseover="this.style.backgroundColor='#c0392b';"
                             onmouseout="this.style.backgroundColor='#e74c3c';"
                     >
                         <i
                                 class="fas fa-trash"
-                                style="
-              font-size: 18px;
-              color: #ffffff;
-              transition: color 0.2s ease;"
+                                style="font-size: 18px; color: #ffffff; transition: color 0.2s ease;"
                                 onmouseover="this.style.color='#a5a5a5';"
                                 onmouseout="this.style.color='#ffffff';"
                         ></i>
@@ -447,18 +483,15 @@
     {% endfor %}
 </ul>
 
-<!-- Neues To-Do hinzufügen -->
-<form method="POST" action="/new_task" style="margin-top: 20px;">
+<div>
     <input
+            type="text"
             id="task_title"
             name="task_title"
-            type="text"
             style="padding: 5px; width: 200px;"
             placeholder="Neues To-do..."
     >
-    <button type="submit" style="padding: 5px 10px; margin-left: 5px;">
-        Hinzufügen
-    </button>
-</form>
+    <button type="button" id="addTaskButton">Hinzufügen</button>
+</div>
 </body>
 </html>
