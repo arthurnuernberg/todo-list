@@ -158,21 +158,7 @@
         }
     </style>
     <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const input = document.getElementById('task_title');
-            const addButton = document.getElementById('addTaskButton');
 
-            input.addEventListener('keydown', function (event) {
-                if (event.key === 'Enter') {
-                    event.preventDefault();
-                    newTask(input.value);
-                }
-            });
-
-            addButton.addEventListener('click', function () {
-                newTask(input.value);
-            });
-        });
 
         async function saveTitle() {
             const titleElement = document.getElementById('editable-title');
@@ -207,7 +193,7 @@
             newTagElement.classList.add('tag-wrapper');
             newTagElement.innerHTML = `
       <span class="tags" contenteditable="true">${newTagName}</span>
-      <i class="fa-trash"></i>
+      <i class="fa fa-trash" onclick="removeTag(${taskId}, '${newTagName}')"></i>
     `;
 
             // Füge das neue Tag dem Tags-Wrapper hinzu
@@ -218,6 +204,8 @@
 
             // Eingabefeld zurücksetzen
             input.value = '';
+            updateTask(taskId);
+            window.window.location.reload();
         }
 
         async function updateTask(taskId) {
@@ -227,7 +215,7 @@
             const description = taskContainer.querySelector(`#description-${taskId}`).textContent.trim();
 
             // Alle Elemente mit der Klasse 'tags' innerhalb des Task-Containers sammeln
-            const tags = Array.from(taskContainer.querySelectorAll('.tags'))
+            const tags = Array.from(taskContainer.querySelectorAll('.tag-wrapper .tags'))
                 .map(tag => tag.textContent.trim())
                 .filter(tag => tag !== ''); // Leere Einträge herausfiltern
 
@@ -289,6 +277,64 @@
                 }
                 {
                     window.location.reload();
+                }
+            } catch (error) {
+                console.error('Fehler beim Senden der Anfrage:', error);
+            }
+        }
+
+        async function tickTask(taskId) {
+            try {
+                const response = await fetch('/tick', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({task_id: taskId}),
+                });
+
+                if (!response.ok) {
+                    console.error('Fehler beim Umschalten des To-dos:', response.statusText);
+                }
+            } catch (error) {
+                console.error('Fehler beim Senden der Anfrage:', error);
+            }
+        }
+
+        async function deleteTask(taskId) {
+            try {
+                const response = await fetch('/delete_task', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({task_id: taskId}),
+                });
+
+                if (!response.ok) {
+                    console.error('Fehler beim Löschen des To-dos:', response.statusText);
+                }
+                window.location.reload();
+            } catch (error) {
+                console.error('Fehler beim Senden der Anfrage:', error);
+            }
+        }
+
+        async function updateDueDate(taskId, dueDate) {
+            try {
+                const response = await fetch('/update_date', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        task_id: taskId,
+                        due_date: dueDate
+                    }),
+                });
+
+                if (!response.ok) {
+                    console.error('Fehler beim Aktualisieren des Fälligkeitsdatums:', response.statusText);
                 }
             } catch (error) {
                 console.error('Fehler beim Senden der Anfrage:', error);
@@ -382,16 +428,14 @@
             >
                 <!-- Linke Spalte: Checkbox + Titel -->
                 <div style="display: flex; align-items: center;">
-                    <form method="POST" action="/tick" style="display: inline; margin-right: 8px;">
-                        <input type="hidden" name="task_id" value="{{ task.id }}">
-                        <input
-                                type="checkbox"
-                                onchange="this.form.submit()"
-                                {% if task.completed %}
-                                checked
-                                {% endif %}
-                        >
-                    </form>
+                    <input
+                            type="checkbox"
+                            onchange="this.form.submit()"
+                            {% if task.completed %}
+                            checked
+                            {% endif %}
+                            onclick="tickTask({{ task.id }})"
+                    >
                     <strong id="title-{{ task.id }}"
                             class="editable text-box name"
                             data-task-id="{{ task.id }}"
@@ -424,25 +468,22 @@
                     </div>
                 </div>
             </div>
-
             <!-- Rechte Spalte: Lösch-Button -->
             <div style="text-align: right;">
-                <form method="POST" action="/delete_task" style="display: inline;">
-                    <input type="hidden" name="task_id" value="{{ task.id }}">
-                    <button
-                            type="submit"
-                            class="delete-button"
-                            onmouseover="this.style.backgroundColor='#c0392b';"
-                            onmouseout="this.style.backgroundColor='#e74c3c';"
-                    >
-                        <i
-                                class="fas fa-trash"
-                                style="font-size: 18px; color: #ffffff; transition: color 0.2s ease;"
-                                onmouseover="this.style.color='#a5a5a5';"
-                                onmouseout="this.style.color='#ffffff';"
-                        ></i>
-                    </button>
-                </form>
+                <button
+                        type="submit"
+                        class="delete-button"
+                        onmouseover="this.style.backgroundColor='#c0392b';"
+                        onmouseout="this.style.backgroundColor='#e74c3c';"
+                        onclick="deleteTask({{ task.id }})"
+                >
+                    <i
+                            class="fas fa-trash"
+                            style="font-size: 18px; color: #ffffff; transition: color 0.2s ease;"
+                            onmouseover="this.style.color='#a5a5a5';"
+                            onmouseout="this.style.color='#ffffff';"
+                    ></i>
+                </button>
             </div>
 
             <!-- Beschreibung in kleinerer Schrift, falls vorhanden -->
@@ -465,19 +506,27 @@
 
                 <!-- Bereich zum Hinzufügen eines neuen Tags -->
                 <div class="tag-add-wrapper">
-                    <input type="text" class="tag-input" placeholder="Neuen Tag hinzufügen..."
+                    <input type="text" id="{{task.id}}-add_task" class="tag-input" placeholder="Tag hinzufügen..."
                            list="existing-tags-{{ task.id }}">
                     <datalist id="existing-tags-{{ task.id }}">
                         {% for tag in tags %}
-                        <option value="{{ tag.name }}">
-                            {% endfor %}
+                            <option value="{{ tag.name }}">
+                        {% endfor %}
                     </datalist>
                     <button type="button" onclick="addTag({{ task.id }})">Tag hinzufügen</button>
                 </div>
             </div>
-
-            <!-- Button zum Aktualisieren der Task -->
-            <button type="button" onclick="updateTask({{ task.id }})">Task aktualisieren</button>
+            <script>
+                document.addEventListener('DOMContentLoaded', function () {
+                    const input = document.getElementById('{{task.id}}-add_task');
+                    input.addEventListener('keydown', function (event) {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            addTag({{ task.id }});
+                        }
+                    });
+                });
+            </script>
         </div>
     </li>
     {% endfor %}
@@ -493,5 +542,22 @@
     >
     <button type="button" id="addTaskButton">Hinzufügen</button>
 </div>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const input = document.getElementById('task_title');
+        const addButton = document.getElementById('addTaskButton');
+
+        input.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                newTask(input.value);
+            }
+        });
+
+        addButton.addEventListener('click', function () {
+            newTask(input.value);
+        });
+    });
+</script>
 </body>
 </html>

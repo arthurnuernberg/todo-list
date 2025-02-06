@@ -1,9 +1,9 @@
 use axum::extract::Query;
 use axum::{
-    extract::{Form, State},
+    extract::State,
     response::{Html, Redirect},
     routing::{get, post},
-    Json, Router,
+    Form, Json, Router,
 };
 use chrono::NaiveDateTime;
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
@@ -61,11 +61,12 @@ pub struct AllFilters {
 #[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Debug, Clone)]
 struct Tag {
     name: String,
+    creation_date: DateTime<Local>,
 }
 
 // Form-Daten
 #[derive(Deserialize)]
-struct TaskForm {
+struct TickForm {
     task_id: u32,
 }
 
@@ -143,6 +144,7 @@ impl ToDo {
         self.tags.insert(tag.clone());
         state.tags.lock().unwrap().insert(Tag {
             name: tag.name.to_string(),
+            creation_date: Local::now(),
         });
     }
 
@@ -244,18 +246,18 @@ async fn new_task(State(state): State<AppState>, Json(payload): Json<NewTaskForm
 }
 
 // POST-Handler für /tick
-async fn tick_task(State(state): State<AppState>, Form(input): Form<TaskForm>) -> Redirect {
+async fn tick_task(State(state): State<AppState>, Json(payload): Json<TickForm>) -> Redirect {
     let mut todos = state.todos.lock().unwrap();
-    if let Some(task) = todos.iter_mut().find(|t| t.id == input.task_id) {
+    if let Some(task) = todos.iter_mut().find(|t| t.id == payload.task_id) {
         task.tick();
     }
 
     Redirect::to("/")
 }
 
-async fn delete_task(State(state): State<AppState>, form: Form<TaskForm>) -> Redirect {
+async fn delete_task(State(state): State<AppState>, Json(payload): Json<TickForm>) -> Redirect {
     let mut todos = state.todos.lock().unwrap();
-    if let Some(pos) = todos.iter().position(|todo| todo.id == form.task_id) {
+    if let Some(pos) = todos.iter().position(|todo| todo.id == payload.task_id) {
         todos.remove(pos);
     }
     Redirect::to("/")
@@ -281,24 +283,41 @@ async fn update_task(
                 Some(payload.task_description)
             }
         };
-        task.tags = {
-            payload
-                .tags
-                .iter()
-                .map(|tag| Tag {
-                    name: tag.to_string(),
-                })
-                .collect()
-        };
+        let old_tags = task.tags.clone();
+        task.tags = payload
+            .tags
+            .iter()
+            .map(|tag_name| {
+                if let Some(existing) = old_tags.iter().find(|t| t.name == *tag_name) {
+                    Tag {
+                        name: tag_name.to_string(),
+                        creation_date: existing.creation_date,
+                    }
+                } else {
+                    Tag {
+                        name: tag_name.to_string(),
+                        creation_date: Local::now(),
+                    }
+                }
+            })
+            .collect();
     }
-    state.tags.lock().unwrap().clear();
-    state
-        .tags
-        .lock()
-        .unwrap()
-        .extend(payload.tags.iter().map(|tag| Tag {
-            name: tag.to_string(),
-        }));
+    let mut global_tags = state.tags.lock().unwrap();
+    let old_global_tags = global_tags.clone();
+    global_tags.clear();
+    global_tags.extend(payload.tags.iter().map(|tag_name| {
+        if let Some(existing) = old_global_tags.iter().find(|t| t.name == *tag_name) {
+            Tag {
+                name: tag_name.to_string(),
+                creation_date: existing.creation_date,
+            }
+        } else {
+            Tag {
+                name: tag_name.to_string(),
+                creation_date: Local::now(),
+            }
+        }
+    }));
     Redirect::to("/")
 }
 
