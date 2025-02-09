@@ -176,9 +176,10 @@
                 },
                 body: JSON.stringify({title: newTitle}),
             });
-
             if (!response.ok) {
                 alert('Fehler beim Speichern der Überschrift.');
+            } else {
+                window.location.reload();
             }
         }
 
@@ -241,6 +242,8 @@
 
                 if (!response.ok) {
                     console.error('Fehler beim Aktualisieren der Task:', response.statusText);
+                } else {
+                    window.location.reload();
                 }
             } catch (error) {
                 console.error('Fehler beim Senden der Update-Anfrage:', error);
@@ -319,27 +322,6 @@
                 console.error('Fehler beim Senden der Anfrage:', error);
             }
         }
-
-        async function updateDueDate(taskId, dueDate) {
-            try {
-                const response = await fetch('/update_date', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        task_id: taskId,
-                        due_date: dueDate
-                    }),
-                });
-
-                if (!response.ok) {
-                    console.error('Fehler beim Aktualisieren des Fälligkeitsdatums:', response.statusText);
-                }
-            } catch (error) {
-                console.error('Fehler beim Senden der Anfrage:', error);
-            }
-        }
     </script>
     <link
             href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
@@ -350,12 +332,22 @@
         id="editable-title"
         class="editable"
         contenteditable="true"
-        onblur="saveTitle()"
+        onblur="if (this.textContent.trim() !== this.dataset.originalValue) saveTitle()"
+        onfocus="this.dataset.originalValue = this.textContent.trim()"
 >
     {{ title }}
 </h1>
 
 <form method="GET" action="/" class="filter-form">
+    <div class="filter-group">
+        <label for="list-filter">Tags:</label>
+        <select id="list-filter" name="list" multiple>
+            {% for list in lists %}
+            <option value="{{ list }}">{{list}}</option>
+            {% endfor %}
+        </select>
+    </div>
+
     <div class="filter-group">
         <label for="completed">Status:</label>
         <select id="completed" name="completed">
@@ -440,8 +432,8 @@
                             class="editable text-box name"
                             data-task-id="{{ task.id }}"
                             contenteditable="true"
-                            onblur="updateTask({{ task.id }})"
-                            onfocus="this.dataset.originalValue = this.textContent"
+                            onblur="if (this.textContent.trim() !== this.dataset.originalValue) updateTask({{ task.id }})"
+                            onfocus="this.dataset.originalValue = this.textContent.trim()"
                     >{{ task.title }}</strong>
                 </div>
 
@@ -489,7 +481,11 @@
             <!-- Beschreibung in kleinerer Schrift, falls vorhanden -->
             <p class="text-box description"
                id="description-{{ task.id }}"
-               data-task-id="{{ task.id }}" onblur="updateTask({{ task.id }})" contenteditable="true">
+               data-task-id="{{ task.id }}"
+               contenteditable="true"
+               onblur="if (this.textContent.trim() !== this.dataset.originalValue) updateTask({{ task.id }})"
+               onfocus="this.dataset.originalValue = this.textContent.trim()"
+            >
                 {% if task.description %}
                 {{ task.description }}
                 {% endif %}
@@ -542,6 +538,102 @@
     >
     <button type="button" id="addTaskButton">Hinzufügen</button>
 </div>
+<!-- Der Container für das Erstellen einer neuen Liste -->
+<div class="create-list-container">
+    <!-- Eingabefeld für den neuen Listentitel -->
+    <input id="newListTitle" type="text" placeholder="Neue Liste...">
+    <!-- Der wunderschöne Button -->
+    <button id="createListButton">Liste erstellen</button>
+    <!-- Hier erscheint eine Fehlermeldung, falls etwas nicht stimmt -->
+    <div id="errorMessage" class="error"></div>
+</div>
+<style>
+    .create-list-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin: 20px auto;
+        max-width: 400px;
+    }
+
+    #createListButton {
+        background: linear-gradient(45deg, #6a11cb, #2575fc);
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-size: 16px;
+        cursor: pointer;
+        transition: background 0.3s ease, transform 0.1s ease;
+        margin-top: 10px;
+    }
+
+    #createListButton:hover {
+        background: linear-gradient(45deg, #2575fc, #6a11cb);
+    }
+
+    #createListButton:active {
+        transform: scale(0.98);
+    }
+
+    #errorMessage {
+        color: red;
+        margin-top: 8px;
+        font-size: 14px;
+    }
+</style>
+<!-- Exportiere die existierenden Listen als JavaScript-Array -->
+<script>
+    const existingLists = {{ lists | json_encode | safe }};
+    async function createList() {
+        const titleInput = document.getElementById('newListTitle');
+        const newTitle = titleInput.value.trim();
+        const errorDiv = document.getElementById('errorMessage');
+        errorDiv.textContent = ""; // Vorherige Fehlermeldungen löschen
+
+        // Prüfen, ob etwas eingegeben wurde
+        if (!newTitle) {
+            errorDiv.textContent = "Bitte geben Sie einen Titel ein.";
+            return;
+        }
+
+        // Prüfen, ob der Titel bereits existiert
+        if (existingLists.includes(newTitle)) {
+            errorDiv.textContent = "Diese Liste existiert bereits.";
+            return;
+        }
+
+        try {
+            // Sende den neuen Listentitel als JSON an das Backend (Endpoint: /create_list)
+            const response = await fetch('/create_list', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ list_name: newTitle })
+            });
+
+            if (!response.ok) {
+                errorDiv.textContent = "Fehler beim Erstellen der Liste.";
+            } else {
+                // Bei Erfolg: Seite neu laden, um die neue Liste anzuzeigen
+                window.location.reload();
+            }
+        } catch (error) {
+            console.error("Fehler:", error);
+            errorDiv.textContent = "Ein unerwarteter Fehler ist aufgetreten.";
+        }
+    }
+
+    // Event-Listener für den Button
+    document.getElementById('createListButton').addEventListener('click', createList);
+
+    // Event-Listener, der beim Drücken der Enter-Taste im Eingabefeld denselben Vorgang auslöst
+    document.getElementById('newListTitle').addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+            event.preventDefault(); // Verhindert ein eventuell vorhandenes Formular-Submit
+            createList();
+        }
+    });
+</script>
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const input = document.getElementById('task_title');

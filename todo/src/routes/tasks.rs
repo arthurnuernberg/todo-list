@@ -10,8 +10,9 @@ use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
 use serde::{de, Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tera::{Context, Tera};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 pub type TodoListId = String;
@@ -67,6 +68,9 @@ pub struct AllFilters {
 
     #[serde(default, deserialize_with = "deserialize_comma_separated")]
     tags: Vec<String>,
+
+    #[serde(default)]
+    list: String,
 }
 
 #[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Debug, Clone)]
@@ -110,12 +114,17 @@ struct ChangeListForm {
     list_id: String,
 }
 
+#[derive(Deserialize)]
+struct CreateListForm {
+    list_name: String,
+}
+
 #[allow(dead_code)]
 impl AppState {
-    fn new() -> Self {
+    async fn new() -> Self {
         let mut map: HashMap<TodoListId, TodoList> = HashMap::new();
-        let todo_list = TodoList::new();
-        map.insert(todo_list.id.lock().unwrap().clone(), todo_list.clone());
+        let todo_list = TodoList::new(String::from("To-dos"));
+        map.insert(todo_list.id.lock().await.clone(), todo_list.clone());
         AppState {
             current_list_id: todo_list.id,
             lists: Arc::new(Mutex::new(map)),
@@ -123,26 +132,51 @@ impl AppState {
         }
     }
 
-    pub fn get_current_list(&self) -> TodoList {
-        let current_id = self.current_list_id.lock().unwrap().clone();
+    pub async fn get_current_list(&self) -> TodoList {
+        let current_id = self.current_list_id.lock().await.clone();
         self.lists
             .lock()
-            .unwrap()
+            .await
             .get(&current_id)
             .expect("Aktuelle Liste nicht gefunden")
             .clone()
+    }
+
+    pub async fn get_titles(&self) -> Vec<String> {
+        let mut titles = Vec::new();
+        for list in self.lists.lock().await.values() {
+            let title_lock = list.title.lock().await;
+            titles.push(title_lock.clone());
+        }
+        titles
+    }
+
+    pub async fn get_list_id(&self, name: String) -> Option<TodoListId> {
+        let lists = self.lists.lock().await;
+        for (list_id, list) in lists.iter() {
+            let title = list.title.lock().await;
+            if *title == name {
+                return Some(list_id.clone());
+            }
+        }
+        None
     }
 }
 
 impl Hash for TodoList {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.title.lock().unwrap().hash(state);
+        let title = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(self.title.lock());
+        title.hash(state);
     }
 }
 
 impl PartialEq<Self> for TodoList {
     fn eq(&self, other: &Self) -> bool {
-        self.title.lock().unwrap().eq(&*other.title.lock().unwrap())
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { self.title.lock().await.eq(&*other.title.lock().await) })
     }
 }
 
@@ -176,17 +210,17 @@ impl Todo {
 }
 
 impl TodoList {
-    pub fn new() -> TodoList {
+    pub fn new(name: String) -> TodoList {
         Self {
             id: Arc::new(Mutex::new(Uuid::new_v4().to_string())),
-            title: Arc::new(Mutex::new(String::from("To-dos"))),
+            title: Arc::new(Mutex::new(String::from(name))),
             next_id: Arc::new(Mutex::new(1)),
             todos: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
-    pub fn generate_id(&self) -> u32 {
-        let mut id = self.next_id.lock().unwrap();
+    pub async fn generate_id(&self) -> u32 {
+        let mut id = self.next_id.lock().await;
         let current_id = *id;
         *id += 1;
         current_id
@@ -275,21 +309,26 @@ fn filter_by_tags(todos: &Vec<Todo>, tags: &HashSet<Tag>) -> Vec<Todo> {
 }
 
 async fn new_task(State(state): State<AppState>, Json(payload): Json<NewTaskForm>) -> Redirect {
-    let current_todos = state.get_current_list();
-    let mut todos = current_todos.todos.lock().unwrap();
+    let current_todos = state.get_current_list().await;
+    let mut todos = current_todos.todos.lock().await;
     if payload.task_title.is_empty() {
         return Redirect::to("/");
     }
 
-    let new_todo: Todo = Todo::new(current_todos.generate_id(), payload.task_title, None, false);
+    let new_todo: Todo = Todo::new(
+        current_todos.generate_id().await,
+        payload.task_title,
+        None,
+        false,
+    );
     todos.insert(0, new_todo);
     Redirect::to("/")
 }
 
 // POST-Handler für /tick
 async fn tick_task(State(state): State<AppState>, Json(payload): Json<TickForm>) -> Redirect {
-    let current_todos = state.get_current_list();
-    let mut todos = current_todos.todos.lock().unwrap();
+    let current_todos = state.get_current_list().await;
+    let mut todos = current_todos.todos.lock().await;
     if let Some(task) = todos.iter_mut().find(|t| t.id == payload.task_id) {
         task.tick();
     }
@@ -298,8 +337,8 @@ async fn tick_task(State(state): State<AppState>, Json(payload): Json<TickForm>)
 }
 
 async fn delete_task(State(state): State<AppState>, Json(payload): Json<TickForm>) -> Redirect {
-    let current_todos = state.get_current_list();
-    let mut todos = current_todos.todos.lock().unwrap();
+    let current_todos = state.get_current_list().await;
+    let mut todos = current_todos.todos.lock().await;
     if let Some(pos) = todos.iter().position(|todo| todo.id == payload.task_id) {
         todos.remove(pos);
     }
@@ -310,8 +349,8 @@ async fn update_task(
     State(state): State<AppState>,
     Json(payload): Json<ChangeTaskForm>,
 ) -> Redirect {
-    let current_todos = state.get_current_list();
-    let mut todos = current_todos.todos.lock().unwrap();
+    let current_todos = state.get_current_list().await;
+    let mut todos = current_todos.todos.lock().await;
     if let Some(task) = todos.iter_mut().find(|t| t.id == payload.task_id) {
         task.title = {
             if !payload.task_title.is_empty() {
@@ -328,41 +367,32 @@ async fn update_task(
             }
         };
         let old_tags = task.tags.clone();
-        task.tags = payload
-            .tags
-            .iter()
-            .map(|tag_name| {
-                if let Some(existing) = old_tags.iter().find(|t| t.name == *tag_name) {
-                    Tag {
-                        name: tag_name.to_string(),
-                        creation_date: existing.creation_date,
-                    }
-                } else {
-                    Tag {
-                        name: tag_name.to_string(),
-                        creation_date: Local::now(),
-                    }
-                }
-            })
-            .collect();
+        task.tags = update_tags(&payload.tags, &old_tags);
     }
-    let mut global_tags = state.tags.lock().unwrap();
+    let mut global_tags = state.tags.lock().await;
     let old_global_tags = global_tags.clone();
     global_tags.clear();
-    global_tags.extend(payload.tags.iter().map(|tag_name| {
-        if let Some(existing) = old_global_tags.iter().find(|t| t.name == *tag_name) {
-            Tag {
-                name: tag_name.to_string(),
-                creation_date: existing.creation_date,
-            }
-        } else {
-            Tag {
-                name: tag_name.to_string(),
-                creation_date: Local::now(),
-            }
-        }
-    }));
+    global_tags.extend(update_tags(&payload.tags, &old_global_tags));
     Redirect::to("/")
+}
+
+fn update_tags(new_tags: &Vec<String>, old_tags: &HashSet<Tag>) -> HashSet<Tag> {
+    new_tags
+        .iter()
+        .map(|tag_name| {
+            if let Some(existing) = old_tags.iter().find(|t| t.name == *tag_name) {
+                Tag {
+                    name: tag_name.to_string(),
+                    creation_date: existing.creation_date,
+                }
+            } else {
+                Tag {
+                    name: tag_name.to_string(),
+                    creation_date: Local::now(),
+                }
+            }
+        })
+        .collect()
 }
 
 async fn update_due_date(
@@ -371,10 +401,10 @@ async fn update_due_date(
 ) -> Redirect {
     let naive_dt = NaiveDateTime::parse_from_str(&input.due_date, "%Y-%m-%dT%H:%M");
     if let Ok(dt) = naive_dt {
-        let local_dt = Local.from_local_datetime(&dt).unwrap();
+        let local_dt = Local.from_local_datetime(&dt).single().unwrap();
 
-        let current_todos = state.get_current_list();
-        let mut todos = current_todos.todos.lock().unwrap();
+        let current_todos = state.get_current_list().await;
+        let mut todos = current_todos.todos.lock().await;
         if let Some(task) = todos.iter_mut().find(|t| t.id == input.task_id) {
             task.due_date = Some(local_dt);
         }
@@ -386,8 +416,8 @@ async fn update_list_title(
     State(state): State<AppState>,
     Json(payload): Json<TitleUpdate>,
 ) -> Redirect {
-    let current_todos = state.get_current_list();
-    let mut title = current_todos.title.lock().unwrap();
+    let current_todos = state.get_current_list().await;
+    let mut title = current_todos.title.lock().await;
     if !payload.title.is_empty() {
         *title = payload.title;
     }
@@ -398,9 +428,24 @@ async fn change_list(
     State(state): State<AppState>,
     Json(payload): Json<ChangeListForm>,
 ) -> Redirect {
-    let lists = state.lists.lock().unwrap();
+    let lists = state.lists.lock().await;
     if let Some(new_list) = lists.get(&payload.list_id) {
-        *state.current_list_id.lock().unwrap() = new_list.id.lock().unwrap().clone();
+        *state.current_list_id.lock().await = new_list.id.lock().await.clone();
+    }
+    Redirect::to("/")
+}
+
+async fn create_list(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateListForm>,
+) -> Redirect {
+    if !state.get_titles().await.contains(&payload.list_name) {
+        let new_list = TodoList::new(payload.list_name);
+        state
+            .lists
+            .lock()
+            .await
+            .insert(new_list.clone().id.lock().await.to_string(), new_list);
     }
     Redirect::to("/")
 }
@@ -409,25 +454,43 @@ pub async fn tasks(
     State(state): State<AppState>,
     Query(filters): Query<AllFilters>,
 ) -> Html<String> {
-    let current_todos = state.get_current_list();
-    let mut todos = current_todos.todos.lock().unwrap();
-    todos.iter_mut().for_each(|todo| {
-        todo.check_overdue();
-    });
-    let title = current_todos.title.lock().unwrap();
-    let tags = state.tags.lock().unwrap();
-    let now_string = {
-        let now = Local::now();
-        format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}",
-            now.year(),
-            now.month(),
-            now.day(),
-            now.hour(),
-            now.minute(),
-        )
+    if !filters.list.is_empty() {
+        let current_id = state.get_list_id(filters.list).await.unwrap();
+        *state.current_list_id.lock().await = current_id;
+    }
+    let current_list = state.get_current_list().await;
+
+    let todos = {
+        let todos_lock = current_list.todos.lock().await;
+        todos_lock.clone()
     };
-    let mut filtered_todos = todos.clone();
+
+    let mut updated_todos = todos.clone();
+    for todo in &mut updated_todos {
+        todo.check_overdue();
+    }
+
+    let title = {
+        let title_lock = current_list.title.lock().await;
+        title_lock.clone()
+    };
+
+    let tags = {
+        let tags_lock = state.tags.lock().await;
+        tags_lock.clone()
+    };
+
+    let now = Local::now();
+    let now_string = format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}",
+        now.year(),
+        now.month(),
+        now.day(),
+        now.hour(),
+        now.minute()
+    );
+
+    let mut filtered_todos = updated_todos;
 
     if let Some(completed) = filters.completed {
         filtered_todos = filtered_todos
@@ -454,23 +517,25 @@ pub async fn tasks(
             .collect();
     }
 
-    if !&filters.tags.is_empty() {
+    if !filters.tags.is_empty() {
         filtered_todos = filter_by_tags(&filtered_todos, &tags);
     }
 
+    let todo_lists = state.get_titles().await;
     let tera = Tera::new("src/templates/**/*").unwrap();
     let mut context = Context::new();
 
-    context.insert("tasks", &*filtered_todos);
-    context.insert("title", &*title);
+    context.insert("lists", &todo_lists);
+    context.insert("tasks", &filtered_todos);
+    context.insert("title", &title);
     context.insert("now_string", &now_string);
-    context.insert("tags", &*tags);
+    context.insert("tags", &tags);
 
     let rendered = tera.render("tasks.html", &context).unwrap();
     Html(rendered)
 }
 
-pub fn routes() -> Router {
+pub async fn routes() -> Router {
     // Beispiel-Daten
     Arc::new(Mutex::new(vec![
         Todo::new(1, "X aufkaufen".to_string(), None, true),
@@ -482,16 +547,16 @@ pub fn routes() -> Router {
         ),
     ]));
 
-    let app_state = AppState::new();
-    let current_list_id = {
-        let current_id_lock = app_state.current_list_id.lock().unwrap();
+    let app_state = AppState::new().await;
+    let current_list_id = async {
+        let current_id_lock = app_state.current_list_id.lock().await;
         current_id_lock.clone()
     };
 
-    {
-        let mut lists = app_state.lists.lock().unwrap();
-        if let Some(list) = lists.get_mut(&current_list_id) {
-            let mut todos = list.todos.lock().unwrap();
+    async {
+        let mut lists = app_state.lists.lock().await;
+        if let Some(list) = lists.get_mut(&current_list_id.await) {
+            let mut todos = list.todos.lock().await;
             todos.extend(vec![
                 Todo::new(1, "X aufkaufen".to_string(), None, true),
                 Todo::new(
@@ -503,7 +568,8 @@ pub fn routes() -> Router {
             ]);
         }
     }
-    
+    .await;
+
     Router::new()
         .route("/", get(tasks))
         .route("/tick", post(tick_task))
@@ -513,5 +579,6 @@ pub fn routes() -> Router {
         .route("/update_date", post(update_due_date))
         .route("/update_task", post(update_task))
         .route("/change_list", post(change_list))
-        .with_state(app_state) // AppState hier binden
+        .route("/create_list", post(create_list))
+        .with_state(app_state)
 }
