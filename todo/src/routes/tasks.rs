@@ -16,6 +16,10 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 pub type TodoListId = String;
+#[allow(dead_code)]
+pub type TagId = String;
+#[allow(dead_code)]
+pub type TaskId = String;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -75,6 +79,7 @@ pub struct AllFilters {
 
 #[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Debug, Clone)]
 pub struct Tag {
+    id: String,
     name: String,
     creation_date: DateTime<Local>,
 }
@@ -120,6 +125,19 @@ struct CreateListForm {
 }
 
 #[allow(dead_code)]
+#[derive(Deserialize)]
+struct SingleStringForm {
+    string: String,
+}
+
+#[derive(Deserialize)]
+struct RenameTagForm {
+    tag_id: String,
+    tag_name: String,
+    task_id: String,
+}
+
+#[allow(dead_code)]
 impl AppState {
     async fn new() -> Self {
         let mut map: HashMap<TodoListId, TodoList> = HashMap::new();
@@ -157,6 +175,40 @@ impl AppState {
             let title = list.title.lock().await;
             if *title == name {
                 return Some(list_id.clone());
+            }
+        }
+        None
+    }
+
+    pub async fn get_todos_for_tag(&self, tag: &Tag, list: Option<&TodoList>) -> Vec<Todo> {
+        let mut todos_with_tag: Vec<Todo> = Vec::new();
+        let lists: Vec<TodoList> = match list {
+            Some(list) => vec![list.clone()],
+            None => self
+                .lists
+                .lock()
+                .await
+                .values()
+                .cloned()
+                .collect::<Vec<TodoList>>(),
+        };
+
+        for list in lists {
+            let todos = list.todos.lock().await;
+            for todo in todos.iter() {
+                if todo.tags.contains(tag) {
+                    todos_with_tag.push(todo.clone());
+                }
+            }
+        }
+        todos_with_tag
+    }
+
+    pub async fn get_tag_from_id(&self, tag_id: String) -> Option<&Tag> {
+        let tags = self.tags.lock().await;
+        for tag in tags.iter() {
+            if tag.id.eq(&tag_id) {
+                Some(tag);
             }
         }
         None
@@ -224,6 +276,16 @@ impl TodoList {
         let current_id = *id;
         *id += 1;
         current_id
+    }
+}
+
+impl Tag {
+    pub fn new(name: String, creation_date: DateTime<Local>) -> Self {
+        Tag {
+            id: Uuid::new_v4().to_string(),
+            name,
+            creation_date,
+        }
     }
 }
 
@@ -381,15 +443,9 @@ fn update_tags(new_tags: &Vec<String>, old_tags: &HashSet<Tag>) -> HashSet<Tag> 
         .iter()
         .map(|tag_name| {
             if let Some(existing) = old_tags.iter().find(|t| t.name == *tag_name) {
-                Tag {
-                    name: tag_name.to_string(),
-                    creation_date: existing.creation_date,
-                }
+                Tag::new(tag_name.to_string(), existing.creation_date)
             } else {
-                Tag {
-                    name: tag_name.to_string(),
-                    creation_date: Local::now(),
-                }
+                Tag::new(tag_name.to_string(), Local::now())
             }
         })
         .collect()
@@ -447,6 +503,48 @@ async fn create_list(
             .await
             .insert(new_list.clone().id.lock().await.to_string(), new_list);
     }
+    Redirect::to("/")
+}
+
+async fn rename_tag(State(state): State<AppState>, Json(payload): Json<RenameTagForm>) -> Redirect {
+    // Hole den Tag, der geändert werden soll.
+    if let Some(existing_tag) = state.get_tag_from_id(payload.tag_id).await.cloned() {
+        // Erstelle eine veränderte Version des Tags (kopiert) mit dem neuen Namen.
+        let mut updated_tag = existing_tag;
+        updated_tag.name = payload.tag_name.clone();
+
+        // Aktualisiere den globalen Tag-Speicher.
+        {
+            let mut global_tags = state.tags.lock().await;
+            global_tags.replace(updated_tag.clone());
+        }
+
+        // Hole die aktuelle List-ID und dann die entsprechende Liste.
+        let current_id = state.current_list_id.lock().await.clone();
+        let lists_guard = state.lists.lock().await;
+        if let Some(current_list) = lists_guard.get(&current_id) {
+            // Sperre die Todos der aktuellen Liste.
+            let mut todos = current_list.todos.lock().await;
+            // Suche nach der Task, deren ID mit payload.task_id übereinstimmt,
+            // und ersetze in dieser Task den Tag.
+            if let Some(todo) = todos.iter_mut().find(|t| t.id.to_string() == payload.task_id) {
+                todo.tags.replace(updated_tag.clone());
+            }
+        }
+    }
+    let _ = tasks(
+        State(state),
+        Query(AllFilters {
+            query: None,
+            tags: vec![String::from("")],
+            list: String::from(""),
+            start_date: None,
+            end_date: None,
+            completed: None,
+            is_due: None,
+        }),
+    )
+    .await;
     Redirect::to("/")
 }
 
@@ -580,5 +678,6 @@ pub async fn routes() -> Router {
         .route("/update_task", post(update_task))
         .route("/change_list", post(change_list))
         .route("/create_list", post(create_list))
+        .route("/rename_tag", post(rename_tag))
         .with_state(app_state)
 }

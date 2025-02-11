@@ -322,6 +322,25 @@
                 console.error('Fehler beim Senden der Anfrage:', error);
             }
         }
+
+        async function renameTag(tagId, tagName, taskId) {
+            try {
+                const response = await fetch('/rename_tag', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({tag_id: tagId, tag_name: tagName, task_id: taskId}),
+                });
+
+                if (!response.ok) {
+                    console.error('Fehler beim Umbenennen des Tags:', response.statusText);
+                }
+                // window.location.reload();
+            } catch (error) {
+                console.error('Fehler beim Senden der Anfrage:', error);
+            }
+        }
     </script>
     <link
             href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
@@ -495,7 +514,12 @@
             <div class="tags-wrapper">
                 {% for tag in task.tags %}
                 <div class="tag-wrapper" id="{{task.id}}-{{ tag.name }}">
-                    <span class="tags" contenteditable="true">{{ tag.name }}</span>
+                    <span class="tags"
+                          contenteditable="true"
+                          onblur="if (this.textContent.trim() !== this.dataset.originalValue) renameTag('{{ tag.name }}','{{ tag.id }}', '{{ task.id }}')"
+                          onfocus="this.dataset.originalValue = this.textContent.trim()">
+                        {{ tag.name }}
+                    </span>
                     <i class="fa fa-trash" onclick="removeTag({{ task.id }}, '{{ tag.name }}')"></i>
                 </div>
                 {% endfor %}
@@ -506,8 +530,8 @@
                            list="existing-tags-{{ task.id }}">
                     <datalist id="existing-tags-{{ task.id }}">
                         {% for tag in tags %}
-                            <option value="{{ tag.name }}">
-                        {% endfor %}
+                        <option value="{{ tag.name }}">
+                            {% endfor %}
                     </datalist>
                     <button type="button" onclick="addTag({{ task.id }})">Tag hinzufügen</button>
                 </div>
@@ -585,6 +609,7 @@
 <!-- Exportiere die existierenden Listen als JavaScript-Array -->
 <script>
     const existingLists = {{ lists | json_encode | safe }};
+
     async function createList() {
         const titleInput = document.getElementById('newListTitle');
         const newTitle = titleInput.value.trim();
@@ -607,8 +632,8 @@
             // Sende den neuen Listentitel als JSON an das Backend (Endpoint: /create_list)
             const response = await fetch('/create_list', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ list_name: newTitle })
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({list_name: newTitle})
             });
 
             if (!response.ok) {
