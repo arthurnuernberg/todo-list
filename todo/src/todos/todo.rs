@@ -1,0 +1,108 @@
+use crate::todos::todos::TagId;
+use chrono::{DateTime, Local};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Todo {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub due_date: Option<DateTime<Local>>,
+    pub created_at: DateTime<Local>,
+    pub completed: bool,
+    pub is_overdue: bool,
+    pub tags: HashSet<TagId>,
+}
+
+impl Todo {
+    pub fn new(id: String, title: String, description: Option<String>, completed: bool) -> Self {
+        Todo {
+            id,
+            title,
+            description,
+            due_date: None,
+            created_at: Local::now(),
+            completed,
+            is_overdue: false,
+            tags: HashSet::new(),
+        }
+    }
+
+    pub fn tick(&mut self) -> &Todo {
+        self.completed = !self.completed;
+        self
+    }
+
+    pub fn check_overdue(&mut self) {
+        self.is_overdue = match self.due_date {
+            Some(d) => d <= Local::now(),
+            None => false,
+        }
+    }
+
+    pub fn add_tag(&mut self, tag_id: TagId) {
+        self.tags.insert(tag_id);
+    }
+
+    #[allow(dead_code)]
+    pub fn remove_tag(&mut self, tag_id: &TagId) {
+        self.tags.remove(tag_id);
+    }
+
+    pub fn matches_query(&self, query: &str) -> bool {
+        self.title.to_lowercase().contains(&query.to_lowercase())
+            || self
+                .description
+                .as_ref()
+                .map_or(false, |desc| desc.to_lowercase().contains(&query))
+    }
+}
+
+#[allow(dead_code)]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn new_description_todo() -> Todo {
+        Todo::new(
+            "1".to_string(),
+            "new_todo".to_string(),
+            Some(String::from("This is the description.")),
+            false,
+        )
+    }
+
+    fn new_todo() -> Todo {
+        Todo::new("1".to_string(), "new_todo".to_string(), None, false)
+    }
+
+    #[test]
+    fn test_tick() {
+        let mut todo = new_description_todo();
+        todo.tick();
+        assert_eq!(todo.completed, true);
+    }
+
+    #[test]
+    fn test_overdue_check() {
+        let mut new_todo = Todo {
+            id: "1234".to_string(),
+            title: "New Title".to_string(),
+            description: Some("New_Description".to_string()),
+            due_date: Some(DateTime::from(
+                DateTime::parse_from_str(
+                    "1983 Apr 13 12:09:14.274 +0000",
+                    "%Y %b %d %H:%M:%S%.3f %z",
+                )
+                .unwrap(),
+            )),
+            created_at: Local::now(),
+            completed: false,
+            is_overdue: false,
+            tags: HashSet::new(),
+        };
+        new_todo.check_overdue();
+        assert_eq!(new_todo.is_overdue, true);
+    }
+}

@@ -1,10 +1,10 @@
-mod routes;
+mod todos;
 
 use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() {
-    let app = routes::app_router();
+    let app = todos::app_router();
 
     // Server starten
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));

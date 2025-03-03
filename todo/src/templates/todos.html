@@ -4,6 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <title>To-Dos</title>
+    <link
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
+            rel="stylesheet">
     <style>
 
         body {
@@ -119,6 +122,10 @@
             background: #45a049;
         }
 
+        .overdue {
+            color: #e74c3c;
+        }
+
         .text-box {
             display: inline-block;
             margin: 5px 0 0;
@@ -158,8 +165,6 @@
         }
     </style>
     <script>
-
-
         async function saveTitle() {
             const titleElement = document.getElementById('editable-title');
             const newTitle = titleElement.textContent.trim();
@@ -183,40 +188,34 @@
             }
         }
 
-        function addTag(taskId) {
-            const taskContainer = document.getElementById(`task-${taskId}`);
-            const input = taskContainer.querySelector('.tag-add-wrapper .tag-input');
-            const newTagName = input.value.trim();
-            if (!newTagName) return;
+        async function addTag(todoId, tagName) {
+            try {
+                const response = await fetch('/add_tag', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({todo_id: todoId, tag_name: tagName}),
+                });
 
-            // Erstelle ein neues Tag-Element
-            const newTagElement = document.createElement('div');
-            newTagElement.classList.add('tag-wrapper');
-            newTagElement.innerHTML = `
-      <span class="tags" contenteditable="true">${newTagName}</span>
-      <i class="fa fa-trash" onclick="removeTag(${taskId}, '${newTagName}')"></i>
-    `;
-
-            // Füge das neue Tag dem Tags-Wrapper hinzu
-            const tagsWrapper = taskContainer.querySelector('.tags-wrapper');
-            // Vor dem Eingabebereich einfügen:
-            const addWrapper = taskContainer.querySelector('.tag-add-wrapper');
-            tagsWrapper.insertBefore(newTagElement, addWrapper);
-
-            // Eingabefeld zurücksetzen
-            input.value = '';
-            updateTask(taskId);
-            window.window.location.reload();
+                if (!response.ok) {
+                    console.error('Fehler beim Aktualisieren der todo:', response.statusText);
+                } else {
+                    window.location.reload();
+                }
+            } catch (error) {
+                console.error('Fehler beim Senden der Update-Anfrage:', error);
+            }
         }
 
-        async function updateTask(taskId) {
-            const taskContainer = document.getElementById(`task-${taskId}`);
-            const titleElement = taskContainer.querySelector(`#title-${taskId}`);
+        async function updateTodo(todoId) {
+            const todoContainer = document.getElementById(`todo-${todoId}`);
+            const titleElement = todoContainer.querySelector(`#title-${todoId}`);
             const name = titleElement.textContent.trim();
-            const description = taskContainer.querySelector(`#description-${taskId}`).textContent.trim();
+            const description = todoContainer.querySelector(`#description-${todoId}`).textContent.trim();
 
-            // Alle Elemente mit der Klasse 'tags' innerhalb des Task-Containers sammeln
-            const tags = Array.from(taskContainer.querySelectorAll('.tag-wrapper .tags'))
+            // Alle Elemente mit der Klasse 'tags' innerhalb des todo-Containers sammeln
+            const tags = Array.from(todoContainer.querySelectorAll('.tag-wrapper .tags'))
                 .map(tag => tag.textContent.trim())
                 .filter(tag => tag !== ''); // Leere Einträge herausfiltern
 
@@ -227,21 +226,21 @@
             }
 
             try {
-                const response = await fetch('/update_task', {
+                const response = await fetch('/update_todo', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        task_id: taskId,
-                        task_title: name,
-                        task_description: description,
+                        todo_id: todoId,
+                        todo_title: name,
+                        todo_description: description,
                         tags: tags,
                     }),
                 });
 
                 if (!response.ok) {
-                    console.error('Fehler beim Aktualisieren der Task:', response.statusText);
+                    console.error('Fehler beim Aktualisieren der todo:', response.statusText);
                 } else {
                     window.location.reload();
                 }
@@ -250,9 +249,24 @@
             }
         }
 
-        async function removeTag(taskId, tagName) {
-            document.getElementById(`${taskId}-${tagName}`).remove();
-            await updateTask(taskId);
+        async function removeTag(tagId) {
+            try {
+                const response = await fetch('/remove_tag', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({tag_id: tagId}),
+                });
+
+                if (!response.ok) {
+                    console.error('Fehler beim Löschen des Tags:', response.statusText);
+                }
+                // window.location.reload();
+            } catch (error) {
+                console.error('Fehler beim Senden der Anfrage:', error);
+            }
+            window.reload()
         }
 
         function updateTagsInput() {
@@ -263,15 +277,15 @@
             document.getElementById('tags').value = selectedValues.join(',');
         }
 
-        async function newTask(name) {
+        async function newTodo(name) {
             try {
-                const response = await fetch('/new_task', {
+                const response = await fetch('/new_todo', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        task_title: name,
+                        todo_title: name,
                     }),
                 })
 
@@ -286,14 +300,14 @@
             }
         }
 
-        async function tickTask(taskId) {
+        async function tickTodo(todoId) {
             try {
                 const response = await fetch('/tick', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({task_id: taskId}),
+                    body: JSON.stringify({todo_id: todoId}),
                 });
 
                 if (!response.ok) {
@@ -304,14 +318,14 @@
             }
         }
 
-        async function deleteTask(taskId) {
+        async function deleteTodo(todoId) {
             try {
-                const response = await fetch('/delete_task', {
+                const response = await fetch('/delete_todo', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({task_id: taskId}),
+                    body: JSON.stringify({todo_id: todoId}),
                 });
 
                 if (!response.ok) {
@@ -323,14 +337,14 @@
             }
         }
 
-        async function renameTag(tagId, tagName, taskId) {
+        async function renameTag(tagId, tagName) {
             try {
                 const response = await fetch('/rename_tag', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({tag_id: tagId, tag_name: tagName, task_id: taskId}),
+                    body: JSON.stringify({tag_id: tagId, tag_name: tagName}),
                 });
 
                 if (!response.ok) {
@@ -341,10 +355,51 @@
                 console.error('Fehler beim Senden der Anfrage:', error);
             }
         }
+
+        // Persistenz über die URL: Filterparameter werden erhalten über die URL
+        document.addEventListener('DOMContentLoaded', function () {
+            // Hole die aktuellen URL-Parameter
+            const params = new URLSearchParams(window.location.search);
+
+            // Finde alle Formularfelder innerhalb des Filter-Forms
+            const formElements = document.querySelectorAll('.filter-form [name]');
+            formElements.forEach(el => {
+                const name = el.getAttribute('name');
+                if (!name) return;
+
+                // Für Mehrfach-Auswahlen: lese alle Werte aus den Parametern
+                if (el.multiple) {
+                    // Bei Mehrfach-Selects: Es können mehrere Werte existieren
+                    const values = params.getAll(name);
+                    Array.from(el.options).forEach(option => {
+                        option.selected = values.includes(option.value);
+                    });
+                } else {
+                    // Für normale Felder: Falls ein Wert existiert, setze ihn
+                    if (params.has(name)) {
+                        el.value = params.get(name);
+                    }
+                }
+            });
+
+            // Falls du eine Funktion hast, die das versteckte "tags"-Feld aktualisiert, aufrufen:
+            if (typeof updateTagsInput === 'function') {
+                updateTagsInput();
+            }
+
+            // Bei Änderungen im Formular die URL aktualisieren, ohne die Seite neu zu laden:
+            const filterForm = document.querySelector('.filter-form');
+            filterForm.addEventListener('change', function () {
+                // Erstelle ein neues FormData-Objekt und wandelt es in URLSearchParams um
+                const formData = new FormData(filterForm);
+                // Für Mehrfachfelder: Falls das Formular Daten als array sendet, können mehrere Werte vorhanden sein
+                const newParams = new URLSearchParams(formData);
+                // Aktualisiere die URL (ohne Reload)
+                const newUrl = window.location.pathname + '?' + newParams.toString();
+                window.history.replaceState({}, '', newUrl);
+            });
+        });
     </script>
-    <link
-            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
-            rel="stylesheet">
 </head>
 <body style="font-family: Arial, sans-serif; margin-top: 40px;">
 <h1
@@ -359,7 +414,7 @@
 
 <form method="GET" action="/" class="filter-form">
     <div class="filter-group">
-        <label for="list-filter">Tags:</label>
+        <label for="list-filter">Liste:</label>
         <select id="list-filter" name="list" multiple>
             {% for list in lists %}
             <option value="{{ list }}">{{list}}</option>
@@ -370,7 +425,7 @@
     <div class="filter-group">
         <label for="completed">Status:</label>
         <select id="completed" name="completed">
-            <option value="">Alle</option>
+            <option value=""></option>
             <option value="true">Erledigt</option>
             <option value="false">Offen</option>
         </select>
@@ -379,7 +434,7 @@
     <div class="filter-group">
         <label for="is_due">Fälligkeit:</label>
         <select id="is_due" name="is_due">
-            <option value="">Alle</option>
+            <option value=""></option>
             <option value="true">Fällig</option>
             <option value="false">Nicht fällig</option>
         </select>
@@ -413,22 +468,39 @@
     <div class="filter-group">
         <label for="tag-filter">Tags:</label>
         <select id="tag-filter" name="tag-filter" multiple onchange="updateTagsInput()">
+            {% if tags %}
             {% for tag in tags %}
             <option value="{{ tag.name }}">{{tag.name}}</option>
             {% endfor %}
+            {% endif %}
         </select>
     </div>
     <input type="hidden" id="tags" name="tags">
+
+    <div class="filter-group">
+        <label for="sort">Sortierung:</label>
+        <select id="sort" name="sort">
+            <option value=""></option>
+            <option value="title_asc">Name (aufsteigend)</option>
+            <option value="title_desc">Name (absteigend)</option>
+            <option value="date_asc">Datum (aufsteigend)</option>
+            <option value="date_desc">Datum (absteigend)</option>
+            <option value="uncompleted">Nicht abgeschlossen zuerst</option>
+            <option value="completed">Abgeschlossen zuerst</option>
+            <option value="overdue">Fällig zuerst</option>
+            <option value="undue">Nicht fällig zuerst</option>
+        </select>
+    </div>
 
     <button type="submit" class="filter-button">
         <i class="fas fa-filter"></i> Filtern
     </button>
 </form>
 <ul style="list-style-type: none; min-width: 70%; padding: 0; max-width: 70%;">
-    {% for task in tasks %}
+    {% for todo in todos %}
     <li style="border-bottom: 1px solid #ccc; padding: 10px 0;"
-        class="{% if task.is_overdue and not task.completed %}overdue{% endif %}">
-        <div class="task" id="task-{{ task.id }}">
+        class="{% if todo.is_overdue and not todo.completed %}overdue{% endif %}">
+        <div class="todo" id="todo-{{ todo.id }}">
             <div
                     style="
       display: grid;
@@ -442,26 +514,26 @@
                     <input
                             type="checkbox"
                             onchange="this.form.submit()"
-                            {% if task.completed %}
+                            {% if todo.completed %}
                             checked
                             {% endif %}
-                            onclick="tickTask({{ task.id }})"
+                            onclick="tickTodo('{{ todo.id }}')"
                     >
-                    <strong id="title-{{ task.id }}"
+                    <strong id="title-{{ todo.id }}"
                             class="editable text-box name"
-                            data-task-id="{{ task.id }}"
+                            data-todo-id="{{ todo.id }}"
                             contenteditable="true"
-                            onblur="if (this.textContent.trim() !== this.dataset.originalValue) updateTask({{ task.id }})"
+                            onblur="if (this.textContent.trim() !== this.dataset.originalValue) updateTodo('{{ todo.id }}')"
                             onfocus="this.dataset.originalValue = this.textContent.trim()"
-                    >{{ task.title }}</strong>
+                    >{{ todo.title }}</strong>
                 </div>
 
                 <!-- Mittlere Spalte: Fälligkeitsdatum + Datumswähler -->
                 <div class="due-date-wrapper">
                     <!-- Angezeigter Text zum Datum -->
-                    {% if task.due_date %}
-                    <span class="due-date-label {% if task.is_overdue %}overdue{% endif %} hover-trigger">
-    Fällig: {{ task.due_date | date(format="%d.%m.%Y %H:%M") }}
+                    {% if todo.due_date %}
+                    <span class="due-date-label {% if todo.is_overdue and not todo.completed %}overdue{% endif %} hover-trigger">
+    Fällig: {{ todo.due_date | date(format="%d.%m.%Y %H:%M") }}
   </span>
                     {% else %}
                     <span class="due-date-label no-date hover-trigger">
@@ -472,7 +544,7 @@
                     <!-- Ausklappbares Datums-Formular -->
                     <div class="due-date-form">
                         <form method="POST" action="/update_date">
-                            <input type="hidden" name="task_id" value="{{ task.id }}">
+                            <input type="hidden" name="todo_id" value="{{ todo.id }}">
                             <input type="datetime-local" name="due_date">
                             <button type="submit">Speichern</button>
                         </form>
@@ -486,7 +558,7 @@
                         class="delete-button"
                         onmouseover="this.style.backgroundColor='#c0392b';"
                         onmouseout="this.style.backgroundColor='#e74c3c';"
-                        onclick="deleteTask({{ task.id }})"
+                        onclick="deleteTodo('{{ todo.id }}')"
                 >
                     <i
                             class="fas fa-trash"
@@ -499,50 +571,50 @@
 
             <!-- Beschreibung in kleinerer Schrift, falls vorhanden -->
             <p class="text-box description"
-               id="description-{{ task.id }}"
-               data-task-id="{{ task.id }}"
+               id="description-{{ todo.id }}"
+               data-todo-id="{{ todo.id }}"
                contenteditable="true"
-               onblur="if (this.textContent.trim() !== this.dataset.originalValue) updateTask({{ task.id }})"
+               onblur="if (this.textContent.trim() !== this.dataset.originalValue) updateTodo('{{ todo.id }}')"
                onfocus="this.dataset.originalValue = this.textContent.trim()"
             >
-                {% if task.description %}
-                {{ task.description }}
+                {% if todo.description %}
+                {{ todo.description }}
                 {% endif %}
             </p>
 
             <!-- Tag Container -->
             <div class="tags-wrapper">
-                {% for tag in task.tags %}
-                <div class="tag-wrapper" id="{{task.id}}-{{ tag.name }}">
+                {% for tag in todo.tags %}
+                <div class="tag-wrapper" id="{{todo.id}}-{{ tag.name }}">
                     <span class="tags"
                           contenteditable="true"
-                          onblur="if (this.textContent.trim() !== this.dataset.originalValue) renameTag('{{ tag.name }}','{{ tag.id }}', '{{ task.id }}')"
+                          onblur="if (this.textContent.trim() !== this.dataset.originalValue) renameTag('{{ tag.id }}', this.textContent.trim())"
                           onfocus="this.dataset.originalValue = this.textContent.trim()">
                         {{ tag.name }}
                     </span>
-                    <i class="fa fa-trash" onclick="removeTag({{ task.id }}, '{{ tag.name }}')"></i>
+                    <i class="fa fa-trash" onclick="removeTag('{{ tag.id }}')"></i>
                 </div>
                 {% endfor %}
 
                 <!-- Bereich zum Hinzufügen eines neuen Tags -->
                 <div class="tag-add-wrapper">
-                    <input type="text" id="{{task.id}}-add_task" class="tag-input" placeholder="Tag hinzufügen..."
-                           list="existing-tags-{{ task.id }}">
-                    <datalist id="existing-tags-{{ task.id }}">
+                    <input type="text" id="{{todo.id}}-add_todo" class="tag-input" placeholder="Tag hinzufügen..."
+                           list="existing-tags-{{ todo.id }}">
+                    <datalist id="existing-tags-{{ todo.id }}">
                         {% for tag in tags %}
                         <option value="{{ tag.name }}">
-                            {% endfor %}
+                        {% endfor %}
                     </datalist>
-                    <button type="button" onclick="addTag({{ task.id }})">Tag hinzufügen</button>
+                    <button type="button" onclick="addTag('{{ todo.id }}', document.getElementById('{{todo.id}}-add_todo').value)">Tag hinzufügen</button>
                 </div>
             </div>
             <script>
                 document.addEventListener('DOMContentLoaded', function () {
-                    const input = document.getElementById('{{task.id}}-add_task');
+                    const input = document.getElementById('{{todo.id}}-add_todo');
                     input.addEventListener('keydown', function (event) {
                         if (event.key === 'Enter') {
                             event.preventDefault();
-                            addTag({{ task.id }})
+                            addTag('{{ todo.id }}', document.getElementById('{{todo.id}}-add_todo').value)
                         }
                     });
                 });
@@ -555,12 +627,12 @@
 <div>
     <input
             type="text"
-            id="task_title"
-            name="task_title"
+            id="todo_title"
+            name="todo_title"
             style="padding: 5px; width: 200px;"
             placeholder="Neues To-do..."
     >
-    <button type="button" id="addTaskButton">Hinzufügen</button>
+    <button type="button" id="addtodoButton">Hinzufügen</button>
 </div>
 <!-- Der Container für das Erstellen einer neuen Liste -->
 <div class="create-list-container">
@@ -661,18 +733,18 @@
 </script>
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        const input = document.getElementById('task_title');
-        const addButton = document.getElementById('addTaskButton');
+        const input = document.getElementById('todo_title');
+        const addButton = document.getElementById('addtodoButton');
 
         input.addEventListener('keydown', function (event) {
             if (event.key === 'Enter') {
                 event.preventDefault();
-                newTask(input.value);
+                newTodo(input.value);
             }
         });
 
         addButton.addEventListener('click', function () {
-            newTask(input.value);
+            newTodo(input.value);
         });
     });
 </script>
