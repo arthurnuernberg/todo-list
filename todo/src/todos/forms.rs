@@ -100,6 +100,21 @@ where
     }
 }
 
+impl AllFilters {
+    pub fn empty_filters(list: String) -> Self {
+        AllFilters {
+            completed: None,
+            is_due: None,
+            start_date: None,
+            end_date: None,
+            query: None,
+            tags: Vec::new(),
+            list,
+            sort: None,
+        }
+    }
+}
+
 // Form-Daten
 #[derive(Deserialize)]
 pub struct TickForm {
@@ -111,6 +126,24 @@ pub struct ChangeTodoForm {
     pub todo_id: String,
     pub todo_title: String,
     pub todo_description: String,
+    pub tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateTodoNameForm {
+    pub todo_id: String,
+    pub todo_name: String,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateTodoDescriptionForm {
+    pub todo_id: String,
+    pub todo_description: String,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateTodoTagsForm {
+    pub todo_id: String,
     pub tags: Vec<String>,
 }
 
@@ -131,13 +164,18 @@ pub struct DueDateForm {
 }
 
 #[derive(Deserialize)]
-pub struct ChangeListForm {
-    pub list_id: String,
+pub struct SwitchListForm {
+    pub list_name: String,
 }
 
 #[derive(Deserialize)]
 pub struct CreateListForm {
     pub list_name: String,
+}
+
+#[derive(Deserialize)]
+pub struct RemoveListForm {
+    pub list_id: String,
 }
 
 #[allow(dead_code)]
@@ -155,6 +193,7 @@ pub struct RenameTagForm {
 
 #[derive(Deserialize)]
 pub struct RemoveTagForm {
+    pub todo_id: String,
     pub tag_id: String,
 }
 #[derive(Deserialize)]

@@ -8,7 +8,7 @@ async fn main() {
 
     // Server starten
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    println!("Server läuft auf https://{}", addr);
+    println!("Server läuft");
     hyper::Server::bind(&addr)
         .serve(app.await.into_make_service())
         .await

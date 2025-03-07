@@ -8,7 +8,6 @@
             href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
             rel="stylesheet">
     <style>
-
         body {
             display: flex;
             flex-direction: column; /* Elemente von oben nach unten anordnen */
@@ -136,7 +135,17 @@
             border: 1pt dashed transparent;
         }
 
-        .text-box:focus {
+        .text-box-tag {
+            display: inline-block;
+            margin: 5px 0 0;
+            width: auto;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            border: 1pt dashed transparent;
+        }
+
+        .text-box:focus,
+        .text-box-tag:focus {
             outline: none;
             border-color: #ccc;
         }
@@ -163,6 +172,40 @@
             font-weight: bold;
             transition: background-color 0.2s ease;
         }
+
+        .create-list-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 20px auto;
+            max-width: 400px;
+        }
+
+        #createListButton {
+            background: linear-gradient(45deg, #6a11cb, #2575fc);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s ease, transform 0.1s ease;
+            margin-top: 10px;
+        }
+
+        #createListButton:hover {
+            background: linear-gradient(45deg, #2575fc, #6a11cb);
+        }
+
+        #createListButton:active {
+            transform: scale(0.98);
+        }
+
+        #errorMessage {
+            color: red;
+            margin-top: 8px;
+            font-size: 14px;
+        }
     </style>
     <script>
         async function saveTitle() {
@@ -183,8 +226,6 @@
             });
             if (!response.ok) {
                 alert('Fehler beim Speichern der Überschrift.');
-            } else {
-                window.location.reload();
             }
         }
 
@@ -208,65 +249,72 @@
             }
         }
 
-        async function updateTodo(todoId) {
-            const todoContainer = document.getElementById(`todo-${todoId}`);
-            const titleElement = todoContainer.querySelector(`#title-${todoId}`);
-            const name = titleElement.textContent.trim();
-            const description = todoContainer.querySelector(`#description-${todoId}`).textContent.trim();
-
-            // Alle Elemente mit der Klasse 'tags' innerhalb des todo-Containers sammeln
-            const tags = Array.from(todoContainer.querySelectorAll('.tag-wrapper .tags'))
-                .map(tag => tag.textContent.trim())
-                .filter(tag => tag !== ''); // Leere Einträge herausfiltern
-
-            if (name === '') {
+        async function updateTodoName(todoId, newName) {
+            const nameElement = document.getElementById(`title-${todoId}`);
+            if (newName === '') {
                 alert('Der Titel darf nicht leer sein.');
-                titleElement.textContent = titleElement.dataset.originalValue;
+                nameElement.textContent = nameElement.dataset.originalValue;
                 return;
             }
 
             try {
-                const response = await fetch('/update_todo', {
+                const response = await fetch('/update_todo_name', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
                         todo_id: todoId,
-                        todo_title: name,
-                        todo_description: description,
-                        tags: tags,
+                        todo_name: newName,
                     }),
                 });
 
                 if (!response.ok) {
-                    console.error('Fehler beim Aktualisieren der todo:', response.statusText);
-                } else {
-                    window.location.reload();
+                    console.error('Fehler beim Aktualisieren des Namens des To-dos:', response.statusText);
                 }
             } catch (error) {
                 console.error('Fehler beim Senden der Update-Anfrage:', error);
             }
         }
 
-        async function removeTag(tagId) {
+        async function updateTodoDescription(todoId, newDescription) {
+            try {
+                const response = await fetch('/update_todo_description', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        todo_id: todoId,
+                        todo_description: newDescription,
+                    }),
+                });
+
+                if (!response.ok) {
+                    console.error('Fehler beim Aktualisieren der Beschreibung des To-dos:', response.statusText);
+                }
+            } catch (error) {
+                console.error('Fehler beim Senden der Update-Anfrage:', error);
+            }
+        }
+
+        async function removeTag(tagId, todoId) {
             try {
                 const response = await fetch('/remove_tag', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({tag_id: tagId}),
+                    body: JSON.stringify({todo_id: todoId, tag_id: tagId}),
                 });
 
                 if (!response.ok) {
                     console.error('Fehler beim Löschen des Tags:', response.statusText);
                 }
-                // window.location.reload();
             } catch (error) {
                 console.error('Fehler beim Senden der Anfrage:', error);
             }
-            window.reload()
+            window.location.reload()
         }
 
         function updateTagsInput() {
@@ -277,9 +325,9 @@
             document.getElementById('tags').value = selectedValues.join(',');
         }
 
-        async function newTodo(name) {
+        async function addTodo(name) {
             try {
-                const response = await fetch('/new_todo', {
+                const response = await fetch('/add_todo', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -302,7 +350,7 @@
 
         async function tickTodo(todoId) {
             try {
-                const response = await fetch('/tick', {
+                const response = await fetch('/tick_todo', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -350,9 +398,90 @@
                 if (!response.ok) {
                     console.error('Fehler beim Umbenennen des Tags:', response.statusText);
                 }
-                // window.location.reload();
             } catch (error) {
                 console.error('Fehler beim Senden der Anfrage:', error);
+            }
+        }
+
+        async function addList(newTitle) {
+            const existingLists = {{ lists | json_encode | safe }};
+
+            // Prüfen, ob etwas eingegeben wurde
+            if (!newTitle) {
+                errorDiv.textContent = "Bitte geben Sie einen Titel ein.";
+                return;
+            }
+
+            // Prüfen, ob der Titel bereits existiert
+            if (existingLists.includes(newTitle)) {
+                errorDiv.textContent = "Diese Liste existiert bereits.";
+                return;
+            }
+
+            try {
+                // Sende den neuen Listentitel als JSON an das Backend (Endpoint: /create_list)
+                const response = await fetch('/add_list', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({list_name: newTitle})
+                });
+
+                if (!response.ok) {
+                    errorDiv.textContent = "Fehler beim Erstellen der Liste.";
+                } else {
+                    // Bei Erfolg: Seite neu laden, um die neue Liste anzuzeigen
+                    window.location.reload();
+                }
+            } catch (error) {
+                console.error("Fehler:", error);
+                errorDiv.textContent = "Ein unerwarteter Fehler ist aufgetreten.";
+            }
+        }
+
+        async function deleteList(listId) {
+            const confirmed = confirm(`Möchten Sie die Liste wirklich löschen?`)
+            if (!confirmed) return;
+            const lists = {{ lists | json_encode | safe }};
+            if (lists.length < 2) {
+                alert("Es muss mindestens eine Liste geben!")
+                return;
+            }
+            try {
+                const response = await fetch('/delete_list', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({list_id: listId})
+                });
+
+                if (!response.ok) {
+                    errorDiv.textContent = `Fehler beim Löschen der Liste mit Id ${listId}.`;
+                }
+                window.location.reload();
+            } catch (error) {
+                console.error("Fehler:", error);
+                errorDiv.textContent = "Ein unerwarteter Fehler ist aufgetreten.";
+            }
+        }
+
+        async function switchList(listName) {
+            if (!listName) {
+                const selectedOption = Array.from(document.getElementById('list-switch').selectedOptions)[0];
+                if (!selectedOption) return;
+                listName = selectedOption.value;
+            }
+            try {
+                const response = await fetch('/switch_list', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({list_name: listName})
+                });
+                if (!response.ok) {
+                    errorDiv.textContent = `Fehler beim Wechseln zur Liste mit Id ${listName}.`;
+                }
+                window.location.reload();
+            } catch (error) {
+                // console.error("Fehler:", error);
+                errorDiv.textContent = "Ein unerwarteter Fehler ist aufgetreten.";
             }
         }
 
@@ -399,12 +528,62 @@
                 window.history.replaceState({}, '', newUrl);
             });
         });
+
+        document.addEventListener('DOMContentLoaded', function () {
+            // Enter drücken bei Eingabe eines neuen To-do-Namen
+            const newTodoInput = document.getElementById('todo_title');
+            newTodoInput.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    addTodo(newTodoInput.value);
+                }
+            });
+
+            // Enter drücken bei Eingabe eines neuen Listen-Namen
+            const newListInput = document.getElementById('newListTitle');
+            newListInput.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    addList(newListInput.value);
+                }
+            });
+
+            const textInputFields = document.getElementsByClassName('single-line-text');
+            for (const field of textInputFields) {
+                field.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        event.target.blur();
+                    }
+                });
+            }
+
+            const tagInputFields = document.querySelectorAll('.tag-input');
+
+            tagInputFields.forEach((inputField) => {
+                inputField.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+
+                        // Die zugehörige Button-ID basierend auf der Input-ID
+                        const buttonId = inputField.id.replace('-add_todo', '-add-tag-button');
+                        const button = document.getElementById(buttonId);
+
+                        if (button) {
+                            button.click(); // Button-Klick auslösen
+                        } else {
+                            console.error('Kein Button gefunden für Input:', inputField.id);
+                        }
+                    }
+                });
+            });
+        });
     </script>
 </head>
 <body style="font-family: Arial, sans-serif; margin-top: 40px;">
 <h1
         id="editable-title"
-        class="editable"
+        class="editable single-line-text"
         contenteditable="true"
         onblur="if (this.textContent.trim() !== this.dataset.originalValue) saveTitle()"
         onfocus="this.dataset.originalValue = this.textContent.trim()"
@@ -412,16 +591,18 @@
     {{ title }}
 </h1>
 
-<form method="GET" action="/" class="filter-form">
-    <div class="filter-group">
-        <label for="list-filter">Liste:</label>
-        <select id="list-filter" name="list" multiple>
-            {% for list in lists %}
-            <option value="{{ list }}">{{list}}</option>
-            {% endfor %}
-        </select>
-    </div>
+<div>
+    <label for="list-switch" style="text-align: center">To-do-Listen</label>
+    <br>
+    <select id="list-switch" name="list-switch" multiple style="width: max-content">
+        {% for list in lists %}
+        <option value="{{ list }}">{{ list }}</option>
+        {% endfor %}
+    </select>
+</div>
+<button onclick="switchList(document.getElementById('list-switch').value.trim())" style="margin-top: 20px">Liste wechseln</button>
 
+<form method="GET" action="/" class="filter-form">
     <div class="filter-group">
         <label for="completed">Status:</label>
         <select id="completed" name="completed">
@@ -481,6 +662,8 @@
         <label for="sort">Sortierung:</label>
         <select id="sort" name="sort">
             <option value=""></option>
+            <option value="last_created">Am Neuesten</option>
+            <option value="first_created">Am Ältesten</option>
             <option value="title_asc">Name (aufsteigend)</option>
             <option value="title_desc">Name (absteigend)</option>
             <option value="date_asc">Datum (aufsteigend)</option>
@@ -520,10 +703,10 @@
                             onclick="tickTodo('{{ todo.id }}')"
                     >
                     <strong id="title-{{ todo.id }}"
-                            class="editable text-box name"
+                            class="editable text-box name single-line-text"
                             data-todo-id="{{ todo.id }}"
                             contenteditable="true"
-                            onblur="if (this.textContent.trim() !== this.dataset.originalValue) updateTodo('{{ todo.id }}')"
+                            onblur="if (this.textContent.trim() !== this.dataset.originalValue) updateTodoName('{{ todo.id }}', this.textContent.trim())"
                             onfocus="this.dataset.originalValue = this.textContent.trim()"
                     >{{ todo.title }}</strong>
                 </div>
@@ -543,7 +726,7 @@
 
                     <!-- Ausklappbares Datums-Formular -->
                     <div class="due-date-form">
-                        <form method="POST" action="/update_date">
+                        <form method="POST" action="/update_todo_date">
                             <input type="hidden" name="todo_id" value="{{ todo.id }}">
                             <input type="datetime-local" name="due_date">
                             <button type="submit">Speichern</button>
@@ -570,11 +753,11 @@
             </div>
 
             <!-- Beschreibung in kleinerer Schrift, falls vorhanden -->
-            <p class="text-box description"
+            <p class="text-box description single-line-text"
                id="description-{{ todo.id }}"
                data-todo-id="{{ todo.id }}"
                contenteditable="true"
-               onblur="if (this.textContent.trim() !== this.dataset.originalValue) updateTodo('{{ todo.id }}')"
+               onblur="if (this.textContent.trim() !== this.dataset.originalValue) updateTodoDescription('{{ todo.id }}', this.textContent.trim())"
                onfocus="this.dataset.originalValue = this.textContent.trim()"
             >
                 {% if todo.description %}
@@ -586,13 +769,13 @@
             <div class="tags-wrapper">
                 {% for tag in todo.tags %}
                 <div class="tag-wrapper" id="{{todo.id}}-{{ tag.name }}">
-                    <span class="tags"
+                    <span class="text-box-tag single-line-text editable"
                           contenteditable="true"
                           onblur="if (this.textContent.trim() !== this.dataset.originalValue) renameTag('{{ tag.id }}', this.textContent.trim())"
                           onfocus="this.dataset.originalValue = this.textContent.trim()">
                         {{ tag.name }}
                     </span>
-                    <i class="fa fa-trash" onclick="removeTag('{{ tag.id }}')"></i>
+                    <i class="fa fa-trash" onclick="removeTag('{{tag.id}}', '{{todo.id}}')"></i>
                 </div>
                 {% endfor %}
 
@@ -600,25 +783,15 @@
                 <div class="tag-add-wrapper">
                     <input type="text" id="{{todo.id}}-add_todo" class="tag-input" placeholder="Tag hinzufügen..."
                            list="existing-tags-{{ todo.id }}">
+                    <!-- Vorschläge der bereits existierenden Tags -->
                     <datalist id="existing-tags-{{ todo.id }}">
                         {% for tag in tags %}
                         <option value="{{ tag.name }}">
                         {% endfor %}
                     </datalist>
-                    <button type="button" onclick="addTag('{{ todo.id }}', document.getElementById('{{todo.id}}-add_todo').value)">Tag hinzufügen</button>
+                    <button id="{{todo.id}}-add-tag-button" class="add-tag-button" type="button" onclick="addTag('{{ todo.id }}', document.getElementById('{{todo.id}}-add_todo').value)">Tag hinzufügen</button>
                 </div>
             </div>
-            <script>
-                document.addEventListener('DOMContentLoaded', function () {
-                    const input = document.getElementById('{{todo.id}}-add_todo');
-                    input.addEventListener('keydown', function (event) {
-                        if (event.key === 'Enter') {
-                            event.preventDefault();
-                            addTag('{{ todo.id }}', document.getElementById('{{todo.id}}-add_todo').value)
-                        }
-                    });
-                });
-            </script>
         </div>
     </li>
     {% endfor %}
@@ -632,121 +805,18 @@
             style="padding: 5px; width: 200px;"
             placeholder="Neues To-do..."
     >
-    <button type="button" id="addtodoButton">Hinzufügen</button>
+    <button type="button" id="addTodoButton" onclick="addTodo(document.getElementById('todo_title').value)">Hinzufügen</button>
+    <br>
 </div>
+    <button type="button" id="deleteListButton" onclick="deleteList('{{ list_id }}')" class="delete-button" style="margin-top: 20px">{{ title }} löschen</button>
 <!-- Der Container für das Erstellen einer neuen Liste -->
 <div class="create-list-container">
     <!-- Eingabefeld für den neuen Listentitel -->
     <input id="newListTitle" type="text" placeholder="Neue Liste...">
     <!-- Der wunderschöne Button -->
-    <button id="createListButton">Liste erstellen</button>
+    <button id="createListButton" onclick="addList(document.getElementById('newListTitle').value)">Liste erstellen</button>
     <!-- Hier erscheint eine Fehlermeldung, falls etwas nicht stimmt -->
     <div id="errorMessage" class="error"></div>
 </div>
-<style>
-    .create-list-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        margin: 20px auto;
-        max-width: 400px;
-    }
-
-    #createListButton {
-        background: linear-gradient(45deg, #6a11cb, #2575fc);
-        color: white;
-        border: none;
-        padding: 12px 24px;
-        border-radius: 8px;
-        font-size: 16px;
-        cursor: pointer;
-        transition: background 0.3s ease, transform 0.1s ease;
-        margin-top: 10px;
-    }
-
-    #createListButton:hover {
-        background: linear-gradient(45deg, #2575fc, #6a11cb);
-    }
-
-    #createListButton:active {
-        transform: scale(0.98);
-    }
-
-    #errorMessage {
-        color: red;
-        margin-top: 8px;
-        font-size: 14px;
-    }
-</style>
-<!-- Exportiere die existierenden Listen als JavaScript-Array -->
-<script>
-    const existingLists = {{ lists | json_encode | safe }};
-
-    async function createList() {
-        const titleInput = document.getElementById('newListTitle');
-        const newTitle = titleInput.value.trim();
-        const errorDiv = document.getElementById('errorMessage');
-        errorDiv.textContent = ""; // Vorherige Fehlermeldungen löschen
-
-        // Prüfen, ob etwas eingegeben wurde
-        if (!newTitle) {
-            errorDiv.textContent = "Bitte geben Sie einen Titel ein.";
-            return;
-        }
-
-        // Prüfen, ob der Titel bereits existiert
-        if (existingLists.includes(newTitle)) {
-            errorDiv.textContent = "Diese Liste existiert bereits.";
-            return;
-        }
-
-        try {
-            // Sende den neuen Listentitel als JSON an das Backend (Endpoint: /create_list)
-            const response = await fetch('/create_list', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({list_name: newTitle})
-            });
-
-            if (!response.ok) {
-                errorDiv.textContent = "Fehler beim Erstellen der Liste.";
-            } else {
-                // Bei Erfolg: Seite neu laden, um die neue Liste anzuzeigen
-                window.location.reload();
-            }
-        } catch (error) {
-            console.error("Fehler:", error);
-            errorDiv.textContent = "Ein unerwarteter Fehler ist aufgetreten.";
-        }
-    }
-
-    // Event-Listener für den Button
-    document.getElementById('createListButton').addEventListener('click', createList);
-
-    // Event-Listener, der beim Drücken der Enter-Taste im Eingabefeld denselben Vorgang auslöst
-    document.getElementById('newListTitle').addEventListener('keydown', function (event) {
-        if (event.key === 'Enter') {
-            event.preventDefault(); // Verhindert ein eventuell vorhandenes Formular-Submit
-            createList();
-        }
-    });
-</script>
-<script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const input = document.getElementById('todo_title');
-        const addButton = document.getElementById('addtodoButton');
-
-        input.addEventListener('keydown', function (event) {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                newTodo(input.value);
-            }
-        });
-
-        addButton.addEventListener('click', function () {
-            newTodo(input.value);
-        });
-    });
-</script>
 </body>
 </html>

@@ -96,6 +96,8 @@ pub fn filter(
         Some("completed")      => completed_first(&filtered_todos),
         Some("overdue")        => overdue_first(&filtered_todos),
         Some("undue")          => undue_first(&filtered_todos),
+        Some("last_created")   => last_created(&filtered_todos),
+        Some("first_created")  => first_created(&filtered_todos),
         None                   => filtered_todos,
         _ => filtered_todos
     };
@@ -103,32 +105,31 @@ pub fn filter(
 }
 
 pub mod sorting {
+    use std::cmp::Reverse;
     use crate::todos::todo::Todo;
 
     pub fn sort_by_title(todos: &Vec<Todo>) -> Vec<Todo> {
         let mut sorted_todos = todos.clone();
-        sorted_todos.sort_by_key(|todo| (todo.title.clone(), todo.description.clone()));
+        sorted_todos.sort_by_key(|todo| (todo.title.clone(), todo.description.clone().unwrap_or_default()));
         sorted_todos
     }
 
     pub fn sort_by_title_descending(todos: &Vec<Todo>) -> Vec<Todo> {
         let mut sorted_todos = todos.clone();
-        sorted_todos.sort_by_key(|todo| (todo.title.clone(), todo.description.clone()));
-        sorted_todos.reverse();
+        sorted_todos.sort_by_key(|todo| (Reverse(todo.title.clone()), Reverse(todo.description.clone().unwrap_or_default())));
         sorted_todos
     }
 
     pub fn sort_by_date(todos: &Vec<Todo>) -> Vec<Todo> {
         let mut sorted_todos = todos.clone();
-        sorted_todos.sort_by_key(|todo| todo.due_date);
+        sorted_todos.sort_by_key(|todo| todo.due_date.unwrap_or_default());
         sorted_todos
     }
 
 
     pub fn sort_by_date_descending(todos: &Vec<Todo>) -> Vec<Todo> {
         let mut sorted_todos = todos.clone();
-        sorted_todos.sort_by_key(|todo| todo.due_date);
-        sorted_todos.reverse();
+        sorted_todos.sort_by_key(|todo| Reverse(todo.due_date.unwrap_or_default()));
         sorted_todos
     }
 
@@ -146,13 +147,25 @@ pub mod sorting {
 
     pub fn overdue_first(todos: &Vec<Todo>) -> Vec<Todo> {
         let mut sorted_todos = todos.clone();
-        sorted_todos.sort_by_key(|todo| (!todo.is_overdue, todo.due_date.clone()));
+        sorted_todos.sort_by_key(|todo| (!todo.is_overdue, todo.due_date.unwrap_or_default().clone()));
         sorted_todos
     }
 
     pub fn undue_first(todos: &Vec<Todo>) -> Vec<Todo> {
         let mut sorted_todos = todos.clone();
-        sorted_todos.sort_by_key(|todo| (todo.is_overdue, todo.due_date.clone()));
+        sorted_todos.sort_by_key(|todo| (todo.is_overdue, todo.due_date.unwrap_or_default().clone()));
+        sorted_todos
+    }
+    
+    pub fn last_created(todos: &Vec<Todo>) -> Vec<Todo> {
+        let mut sorted_todos = todos.clone();
+        sorted_todos.sort_by_key(|todo| (Reverse(todo.created_at), todo.title.clone()));
+        sorted_todos
+    }
+
+    pub fn first_created(todos: &Vec<Todo>) -> Vec<Todo> {
+        let mut sorted_todos = todos.clone();
+        sorted_todos.sort_by_key(|todo| (todo.created_at, todo.title.clone()));
         sorted_todos
     }
 }

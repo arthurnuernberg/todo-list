@@ -33,6 +33,26 @@ impl Todo {
         self.completed = !self.completed;
         self
     }
+    
+    pub fn update_description(&mut self, new_description: String) {
+        self.description = {
+            if new_description.is_empty() {
+                None
+            } else {
+                Some(new_description)
+            }
+        };
+    }
+    
+    pub fn update_title(&mut self, new_title: String) {
+        if !new_title.is_empty() {
+            self.title = new_title
+        }
+    }
+    
+    pub fn update_tags(&mut self, new_tags: HashSet<TagId>) {
+        self.tags = new_tags;
+    }
 
     pub fn check_overdue(&mut self) {
         self.is_overdue = match self.due_date {
@@ -104,5 +124,12 @@ mod tests {
         };
         new_todo.check_overdue();
         assert_eq!(new_todo.is_overdue, true);
+    }
+    
+    #[test]
+    fn test_update_description() {
+        let mut new_todo = new_description_todo();
+        new_todo.update_description("the description has changed.".to_string());
+        assert_eq!("the description has changed.".to_string(), new_todo.description.unwrap())
     }
 }
