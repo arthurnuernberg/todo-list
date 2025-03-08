@@ -1,12 +1,23 @@
 body {
-    font-family: "Roboto", Helvetica, Arial, sans-serif;
+    display: flex;
+    flex-direction: column; /* Elemente von oben nach unten anordnen */
+    align-items: center; /* Horizontal zentrieren */
+    margin: 0 auto; /* Automatische horizontale Zentrierung */
+    width: 80%; /* Breite auf 80% des Viewports beschränken */
+    min-height: 100vh; /* Body mindestens so hoch wie der Viewport */
 }
 
 .due-date-wrapper {
-    position: relative; /* Damit .due-date-form absolut positioniert werden kann */
-    display: inline-block; /* Oder block, je nach Layoutwunsch */
-    padding: 10px 20px; /* Großzügige Innenabstände, damit man sicher "drüber" ist */
-    margin: 0 0 0 auto; /* Beispiel: nach rechts schieben (optional) */
+    position: relative;
+    display: block;
+    padding: 10px 20px;
+}
+
+.hover-trigger {
+    display: inline-block;
+    position: relative;
+    cursor: pointer;
+    padding: 4px 8px;
 }
 
 /* Der Text, der immer zu sehen ist */
@@ -21,15 +32,18 @@ body {
 
 /* Das eigentlich versteckte Formular */
 .due-date-form {
+    min-width: unset;
+    width: max-content;
+    top: 100%;
+    left: 0;
+    margin-top: -10px;
     display: none; /* Unsichtbar, bis Hover */
     position: absolute; /* Überlagert den Inhalt */
-    top: 100%; /* Direkt unterhalb der Wrapper-Box */
     right: 0; /* Am rechten Rand ausrichten */
     background-color: #fff; /* Weißer Hintergrund */
     border: 1px solid #ccc;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
     padding: 8px;
-    min-width: 200px;
     z-index: 999;
 }
 
@@ -50,4 +64,134 @@ body {
 /* Bei Hover über den gesamten Wrapper: Formular anzeigen */
 .due-date-wrapper:hover .due-date-form {
     display: block;
+}
+
+/* Standardzustand: kein Rahmen, Element als inline-block */
+h1[contenteditable="true"] {
+    display: inline-block;
+    border: 1px dashed transparent; /* Unsichtbarer Rahmen als Platzhalter */
+    padding: 4px;
+    margin: 0;
+}
+
+/* Wenn der Nutzer den Inhalt bearbeitet (Fokus), zeigen wir einen sichtbaren Rahmen */
+h1[contenteditable="true"]:focus {
+    outline: none; /* Standard-Fokus-Rahmen ausschalten */
+    border-color: #ccc; /* Rahmen in Hellgrau */
+}
+
+.filter-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin: 2rem 0;
+    padding: 1rem;
+    background: #f5f5f5;
+    border-radius: 8px;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.filter-button {
+    align-self: end;
+    padding: 0.5rem 1rem;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.filter-button:hover {
+    background: #45a049;
+}
+
+.overdue {
+    color: #e74c3c;
+}
+
+.text-box {
+    display: inline-block;
+    margin: 5px 0 0;
+    width: auto;
+    min-width: 100px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    border: 1pt dashed transparent;
+}
+
+.text-box-tag {
+    display: inline-block;
+    margin: 5px 0 0;
+    width: auto;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    border: 1pt dashed transparent;
+}
+
+.text-box:focus,
+.text-box-tag:focus {
+    outline: none;
+    border-color: #ccc;
+}
+
+.name {
+    max-width: 90%;
+    border: 1px dashed transparent;
+}
+
+.description {
+    font-size: 0.85rem;
+    color: #666;
+    max-width: 90%;
+}
+
+.delete-button {
+    min-width: auto;
+    background-color: #e74c3c;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 10px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background-color 0.2s ease;
+}
+
+.create-list-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 20px auto;
+    max-width: 400px;
+}
+
+#createListButton {
+    background: linear-gradient(45deg, #6a11cb, #2575fc);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background 0.3s ease, transform 0.1s ease;
+    margin-top: 10px;
+}
+
+#createListButton:hover {
+    background: linear-gradient(45deg, #2575fc, #6a11cb);
+}
+
+#createListButton:active {
+    transform: scale(0.98);
+}
+
+#errorMessage {
+    color: red;
+    margin-top: 8px;
+    font-size: 14px;
 }

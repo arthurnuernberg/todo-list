@@ -9,10 +9,11 @@ use chrono::NaiveDateTime;
 use chrono::{DateTime, Local, TimeZone};
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use tera::{Context, Tera};
+use tera::{Context, Result as TeraResult, Tera, Value};
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
@@ -254,7 +255,7 @@ impl Tag {
             creation_date,
         }
     }
-    
+
     pub fn change_name(&mut self, name: String) {
         self.name = name;
     }
@@ -406,7 +407,10 @@ pub async fn rename_tag(
     if let Some(tag) = state.tags.write().await.get_mut(&payload.tag_id) {
         tag.lock().await.change_name(payload.tag_name);
     } else {
-        eprintln!("Der folgende Tag konnte nicht umbenannt werden: {}", payload.tag_id);
+        eprintln!(
+            "Der folgende Tag konnte nicht umbenannt werden: {}",
+            payload.tag_id
+        );
     }
     Redirect::to("/")
 }
@@ -468,7 +472,7 @@ pub async fn todos(
             *state.current_list_id.lock().await = current_id;
         }
     }*/
-    
+
     let current_list = state.get_current_list().await;
     let mut updated_todos = current_list.todos.lock().await.clone();
 
@@ -496,7 +500,8 @@ pub async fn todos(
     let current_list_id = state.current_list_id.lock().await.clone();
 
     // HTML parsen
-    let tera = Tera::new("src/templates/**/*").unwrap();
+    let mut tera = Tera::new("src/templates/**/*").unwrap();
+    tera.register_filter("json_encode_single", json_encode_single);
     let mut context = Context::new();
     context.insert("title", &title);
     context.insert("list_id", &current_list_id);
@@ -506,6 +511,14 @@ pub async fn todos(
 
     let rendered = tera.render("todos.html", &context).unwrap();
     Html(rendered)
+}
+
+pub fn json_encode_single(value: &Value, _args: &HashMap<String, Value>) -> TeraResult<Value> {
+    // Erzeuge validen JSON-String (mit doppelten Anführungszeichen)
+    let json_str = serde_json::to_string(value).map_err(|e| tera::Error::msg(e.to_string()))?;
+    // Ersetze doppelte Anführungszeichen durch einfache
+    let single_quoted = json_str.replace("\"", "'");
+    Ok(Value::String(single_quoted))
 }
 
 pub async fn routes() -> Router {
