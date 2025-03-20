@@ -6,6 +6,7 @@ mod todo;
 mod forms;
 mod lib;
 mod filter;
+mod db;
 
 #[allow(dead_code)]
 pub async fn app_router() -> Router {

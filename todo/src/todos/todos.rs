@@ -5,12 +5,15 @@ use axum::{
     routing::{get, post},
     Form, Json, Router,
 };
-use chrono::NaiveDateTime;
-use chrono::{DateTime, Local, TimeZone};
+use chrono::{DateTime, Local};
+use chrono::{NaiveDateTime};
+use dotenv::dotenv;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tera::{Context, Result as TeraResult, Tera, Value};
@@ -21,6 +24,7 @@ use crate::todos;
 use todos::filter::*;
 use todos::forms::*;
 use todos::todo::*;
+use todos::db::*;
 
 pub type TodoListId = String;
 pub type TagId = String;
@@ -31,6 +35,7 @@ pub struct AppState {
     pub current_list_id: Arc<Mutex<TodoListId>>,
     pub lists: Arc<Mutex<HashMap<TodoListId, Arc<TodoList>>>>,
     pub tags: Arc<RwLock<HashMap<String, Arc<Mutex<Tag>>>>>,
+    pub db_pool: PgPool,
 }
 
 #[derive(Debug, Clone)]
@@ -44,12 +49,12 @@ pub struct TodoList {
 pub struct Tag {
     pub id: String,
     pub name: String,
-    pub creation_date: DateTime<Local>,
+    pub created_at: DateTime<Local>,
 }
 
 #[allow(dead_code)]
 impl AppState {
-    async fn new() -> Self {
+    async fn new(db_pool: PgPool) -> Self {
         let mut map: HashMap<TodoListId, Arc<TodoList>> = HashMap::new();
         let todo_list = TodoList::new(String::from("To-dos"));
         map.insert(
@@ -60,6 +65,7 @@ impl AppState {
             current_list_id: todo_list.id,
             lists: Arc::new(Mutex::new(map)),
             tags: Arc::new(RwLock::new(HashMap::new())),
+            db_pool,
         }
     }
 
@@ -252,7 +258,7 @@ impl Tag {
         Tag {
             id: Uuid::new_v4().to_string(),
             name,
-            creation_date,
+            created_at: creation_date,
         }
     }
 
@@ -269,7 +275,8 @@ async fn new_todo(State(state): State<AppState>, Json(payload): Json<NewTodoForm
     }
 
     let new_todo: Todo = Todo::new(Uuid::new_v4().to_string(), payload.todo_title, None, false);
-    todos.insert(0, new_todo);
+    todos.insert(0, new_todo.clone());
+    let _ = insert_todo(&state.db_pool, &new_todo).await;
     Redirect::to("/")
 }
 
@@ -334,12 +341,12 @@ async fn update_due_date(
 ) -> Redirect {
     let naive_dt = NaiveDateTime::parse_from_str(&input.due_date, "%Y-%m-%dT%H:%M");
     if let Ok(dt) = naive_dt {
-        let local_dt = Local.from_local_datetime(&dt).single().unwrap();
+        let utc_dt = dt.and_utc();
 
         let current_todos = state.get_current_list().await;
         let mut todos = current_todos.todos.lock().await;
         if let Some(todo) = todos.iter_mut().find(|t| t.id == input.todo_id) {
-            todo.due_date = Some(local_dt);
+            todo.due_date = Some(utc_dt);
         }
     }
     Redirect::to("/")
@@ -514,15 +521,22 @@ pub async fn todos(
 }
 
 pub fn json_encode_single(value: &Value, _args: &HashMap<String, Value>) -> TeraResult<Value> {
-    // Erzeuge validen JSON-String (mit doppelten Anführungszeichen)
     let json_str = serde_json::to_string(value).map_err(|e| tera::Error::msg(e.to_string()))?;
-    // Ersetze doppelte Anführungszeichen durch einfache
     let single_quoted = json_str.replace("\"", "'");
     Ok(Value::String(single_quoted))
 }
 
+//noinspection ALL
 pub async fn routes() -> Router {
-    let app_state = AppState::new().await;
+    dotenv().ok(); // Lade Umgebungsvariablen aus .env
+
+    let database_url = env::var("DATABASE_URL").expect("Datenbank muss gesetzt sein");
+    let pool = PgPool::connect(&database_url)
+        .await
+        .expect("Konnte nicht mit der DB verbinden");
+
+    let app_state = AppState::new(pool).await;
+
     let current_list_id = async {
         let current_id_lock = app_state.current_list_id.lock().await;
         current_id_lock.clone()
@@ -571,6 +585,7 @@ pub async fn routes() -> Router {
 #[allow(dead_code)]
 #[cfg(test)]
 mod tests {
+    use chrono::TimeZone;
     use super::*;
 
     async fn todos_setup() -> TodoList {
@@ -617,7 +632,7 @@ mod tests {
             Some("This is the description of the second todo".to_string()),
             true,
         );
-        second_todo.tags.insert(first_tag.id);
+        second_todo.tags.push(first_tag.id);
         list.extend(vec![first_todo, second_todo.clone()]);
         list
     }
@@ -658,7 +673,7 @@ mod tests {
             Some("This is the description of the second todo".to_string()),
             true,
         );
-        second_todo.tags.insert(first_tag.id);
+        second_todo.tags.push(first_tag.id);
         list.extend(vec![first_todo, second_todo.clone()]);
 
         // Filterfunktion testen

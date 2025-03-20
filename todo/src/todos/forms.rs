@@ -1,5 +1,5 @@
 use crate::todos::todos::Tag;
-use chrono::{DateTime, Local, NaiveDateTime};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{de, Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -9,8 +9,8 @@ pub struct FrontendTodo {
     pub id: String,
     pub title: String,
     pub description: Option<String>,
-    pub due_date: Option<DateTime<Local>>,
-    pub created_at: DateTime<Local>,
+    pub due_date: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
     pub completed: bool,
     pub is_overdue: bool,
     pub tags: HashSet<Tag>,

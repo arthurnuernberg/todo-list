@@ -1,18 +1,19 @@
 use crate::todos::todos::TagId;
-use chrono::{DateTime, Local};
+use chrono::{Local, DateTime};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use chrono::Utc;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Todo {
     pub id: String,
     pub title: String,
     pub description: Option<String>,
-    pub due_date: Option<DateTime<Local>>,
-    pub created_at: DateTime<Local>,
+    pub due_date: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
     pub completed: bool,
     pub is_overdue: bool,
-    pub tags: HashSet<TagId>,
+    pub tags: Vec<TagId>,
 }
 
 impl Todo {
@@ -22,10 +23,10 @@ impl Todo {
             title,
             description,
             due_date: None,
-            created_at: Local::now(),
+            created_at: Utc::now(),
             completed,
             is_overdue: false,
-            tags: HashSet::new(),
+            tags: Vec::new(),
         }
     }
 
@@ -50,7 +51,7 @@ impl Todo {
         }
     }
     
-    pub fn update_tags(&mut self, new_tags: HashSet<TagId>) {
+    pub fn update_tags(&mut self, new_tags: Vec<TagId>) {
         self.tags = new_tags;
     }
 
@@ -62,12 +63,14 @@ impl Todo {
     }
 
     pub fn add_tag(&mut self, tag_id: TagId) {
-        self.tags.insert(tag_id);
+        self.tags.push(tag_id);
     }
 
     #[allow(dead_code)]
     pub fn remove_tag(&mut self, tag_id: &TagId) {
-        self.tags.remove(tag_id);
+        if let Some(pos) = self.tags.iter().position(|t| t == tag_id) {
+            self.tags.remove(pos);
+        }
     }
 
     pub fn matches_query(&self, query: &str) -> bool {
@@ -110,17 +113,15 @@ mod tests {
             id: "1234".to_string(),
             title: "New Title".to_string(),
             description: Some("New_Description".to_string()),
-            due_date: Some(DateTime::from(
-                DateTime::parse_from_str(
-                    "1983 Apr 13 12:09:14.274 +0000",
-                    "%Y %b %d %H:%M:%S%.3f %z",
-                )
-                .unwrap(),
-            )),
-            created_at: Local::now(),
+            due_date: Some(
+                DateTime::parse_from_str("1983 Apr 13 12:09:14.274 +0000", "%Y %b %d %H:%M:%S%.3f %z")
+                    .unwrap()
+                    .with_timezone(&Utc)
+            ),
+            created_at: Utc::now(),
             completed: false,
             is_overdue: false,
-            tags: HashSet::new(),
+            tags: Vec::new(),
         };
         new_todo.check_overdue();
         assert_eq!(new_todo.is_overdue, true);
