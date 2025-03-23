@@ -1,7 +1,7 @@
+use uuid::Uuid;
 use crate::todos::todos::TagId;
 use chrono::{Local, DateTime};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use chrono::Utc;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -17,11 +17,11 @@ pub struct Todo {
 }
 
 impl Todo {
-    pub fn new(id: String, title: String, description: Option<String>, completed: bool) -> Self {
+    pub fn new(id: Uuid, title: &str, description: Option<&str>, completed: bool) -> Self {
         Todo {
-            id,
-            title,
-            description,
+            id: String::from(id),
+            title: String::from(title),
+            description: description.map(|v| v.to_string()),
             due_date: None,
             created_at: Utc::now(),
             completed,
@@ -51,10 +51,6 @@ impl Todo {
         }
     }
     
-    pub fn update_tags(&mut self, new_tags: Vec<TagId>) {
-        self.tags = new_tags;
-    }
-
     pub fn check_overdue(&mut self) {
         self.is_overdue = match self.due_date {
             Some(d) => d <= Local::now(),
@@ -89,15 +85,15 @@ mod tests {
 
     fn new_description_todo() -> Todo {
         Todo::new(
-            "1".to_string(),
-            "new_todo".to_string(),
-            Some(String::from("This is the description.")),
+            Uuid::new_v4(),
+            "new_todo",
+            Some("This is the description."),
             false,
         )
     }
 
     fn new_todo() -> Todo {
-        Todo::new("1".to_string(), "new_todo".to_string(), None, false)
+        Todo::new(Uuid::new_v4(), "new_todo", None, false)
     }
 
     #[test]

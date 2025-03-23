@@ -25,7 +25,7 @@ pub fn filter_by_date_range(
         .collect()
 }
 
-pub fn filter_by_tags(todos: &Vec<Todo>, tags: &Vec<Tag>) -> Vec<Todo> {
+pub fn filter_by_tags(todos: &[Todo], tags: &Vec<Tag>) -> Vec<Todo> {
     todos
         .iter()
         .filter(|todo| {

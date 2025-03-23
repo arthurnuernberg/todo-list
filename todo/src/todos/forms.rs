@@ -1,7 +1,6 @@
 use crate::todos::todos::Tag;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{de, Deserialize, Deserializer, Serialize};
-use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -13,7 +12,7 @@ pub struct FrontendTodo {
     pub created_at: DateTime<Utc>,
     pub completed: bool,
     pub is_overdue: bool,
-    pub tags: HashSet<Tag>,
+    pub tags: Vec<Tag>,
 }
 
 impl Hash for FrontendTodo {
@@ -100,33 +99,10 @@ where
     }
 }
 
-impl AllFilters {
-    pub fn empty_filters(list: String) -> Self {
-        AllFilters {
-            completed: None,
-            is_due: None,
-            start_date: None,
-            end_date: None,
-            query: None,
-            tags: Vec::new(),
-            list,
-            sort: None,
-        }
-    }
-}
-
 // Form-Daten
 #[derive(Deserialize)]
 pub struct TickForm {
     pub todo_id: String,
-}
-
-#[derive(Deserialize)]
-pub struct ChangeTodoForm {
-    pub todo_id: String,
-    pub todo_title: String,
-    pub todo_description: String,
-    pub tags: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -140,13 +116,6 @@ pub struct UpdateTodoDescriptionForm {
     pub todo_id: String,
     pub todo_description: String,
 }
-
-#[derive(Deserialize)]
-pub struct UpdateTodoTagsForm {
-    pub todo_id: String,
-    pub tags: Vec<String>,
-}
-
 #[derive(Deserialize)]
 pub struct NewTodoForm {
     pub todo_title: String,

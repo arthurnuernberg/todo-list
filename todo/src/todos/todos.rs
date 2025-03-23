@@ -1,14 +1,7 @@
-use axum::extract::Query;
-use axum::{
-    extract::State,
-    response::{Html, Redirect},
-    routing::{get, post},
-    Form, Json, Router,
-};
-use chrono::{DateTime, Local};
-use chrono::{NaiveDateTime};
+use axum::{routing::{get, post}, Form, Json, Router};
+use axum_sessions::{async_session::MemoryStore, SessionLayer};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use dotenv::dotenv;
-use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use sqlx::PgPool;
@@ -16,15 +9,18 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use axum::extract::{Query, State};
+use axum::response::{Html, Redirect};
+use axum_sessions::extractors::ReadableSession;
 use tera::{Context, Result as TeraResult, Tera, Value};
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 use crate::todos;
-use todos::filter::*;
+use crate::todos::db::{FrontendList, TodoDatabaseExt};
 use todos::forms::*;
 use todos::todo::*;
-use todos::db::*;
+use crate::todos::filter::filter;
 
 pub type TodoListId = String;
 pub type TagId = String;
@@ -49,14 +45,14 @@ pub struct TodoList {
 pub struct Tag {
     pub id: String,
     pub name: String,
-    pub created_at: DateTime<Local>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[allow(dead_code)]
 impl AppState {
     async fn new(db_pool: PgPool) -> Self {
         let mut map: HashMap<TodoListId, Arc<TodoList>> = HashMap::new();
-        let todo_list = TodoList::new(String::from("To-dos"));
+        let todo_list = TodoList::new("To-dos");
         map.insert(
             todo_list.id.lock().await.clone(),
             Arc::new(todo_list.clone()),
@@ -104,7 +100,10 @@ impl AppState {
             .clone()
     }
 
-    // TODO Methode hat einen Fehler irgendwo
+    pub async fn get_current_list_string(&self) -> TodoListId {
+        self.current_list_id.lock().await.clone()
+    }
+
     pub async fn get_list(&self, list: String) -> Option<Arc<TodoList>> {
         let lists = self.lists.lock().await;
         for todo_list in lists.values() {
@@ -152,7 +151,7 @@ impl AppState {
     pub async fn get_todos_with_tags(&self, todos: Vec<Todo>) -> Vec<FrontendTodo> {
         let mut frontend_todos = Vec::new();
         for todo in todos.iter().cloned() {
-            let mut todo_tags = HashSet::new();
+            let mut todo_tags = Vec::new();
             for tag_id in todo.tags.iter() {
                 let found_tag = self
                     .tags
@@ -163,7 +162,7 @@ impl AppState {
                     .lock()
                     .await
                     .clone();
-                todo_tags.insert(found_tag);
+                todo_tags.push(found_tag);
             }
             frontend_todos.push(FrontendTodo {
                 id: todo.id,
@@ -239,7 +238,7 @@ impl PartialEq<Self> for TodoList {
 impl Eq for TodoList {}
 
 impl TodoList {
-    pub fn new(name: String) -> TodoList {
+    pub fn new(name: &str) -> TodoList {
         Self {
             id: Arc::new(Mutex::new(Uuid::new_v4().to_string())),
             title: Arc::new(Mutex::new(String::from(name))),
@@ -254,7 +253,7 @@ impl TodoList {
 }
 
 impl Tag {
-    pub fn new(name: String, creation_date: DateTime<Local>) -> Self {
+    pub fn new(name: String, creation_date: DateTime<Utc>) -> Self {
         Tag {
             id: Uuid::new_v4().to_string(),
             name,
@@ -267,46 +266,49 @@ impl Tag {
     }
 }
 
-async fn new_todo(State(state): State<AppState>, Json(payload): Json<NewTodoForm>) -> Redirect {
-    let current_todos = state.get_current_list().await;
-    let mut todos = current_todos.todos.lock().await;
+pub fn json_encode_single(value: &Value, _args: &HashMap<String, Value>) -> TeraResult<Value> {
+    let json_str = serde_json::to_string(value).map_err(|e| tera::Error::msg(e.to_string()))?;
+    let single_quoted = json_str.replace("\"", "'");
+    Ok(Value::String(single_quoted))
+}
+
+pub async fn new_todo(State(state): State<AppState>, Json(payload): Json<NewTodoForm>) -> Redirect {
     if payload.todo_title.is_empty() {
         return Redirect::to("/");
     }
 
-    let new_todo: Todo = Todo::new(Uuid::new_v4().to_string(), payload.todo_title, None, false);
-    todos.insert(0, new_todo.clone());
-    let _ = insert_todo(&state.db_pool, &new_todo).await;
-    Redirect::to("/")
-}
-
-// POST-Handler für /tick
-async fn tick_todo(State(state): State<AppState>, Json(payload): Json<TickForm>) -> Redirect {
-    let current_id = {
-        let id_lock = state.current_list_id.lock().await;
-        id_lock.clone()
-    };
-
-    let mut lists = state.lists.lock().await;
-    let list = lists
-        .get_mut(&current_id)
-        .expect("Aktuelle Liste nicht gefunden");
-    let mut todos = list.todos.lock().await;
-
-    for todo in todos.iter_mut() {
-        if todo.id == payload.todo_id {
-            todo.tick();
-            break;
-        }
+    let new_todo: Todo = Todo::new(Uuid::new_v4(), payload.todo_title.as_str(), None, false);
+    if let Err(e) = state
+        .db_pool
+        .add_todo(&new_todo, state.get_current_list_string().await)
+        .await
+    {
+        eprintln!(
+            "Fehler beim Hinzufügen eines To-dos in die Datenbank:\n{:?}",
+            e
+        );
     }
     Redirect::to("/")
 }
 
-async fn delete_todo(State(state): State<AppState>, Json(payload): Json<TickForm>) -> Redirect {
-    let current_todos = state.get_current_list().await;
-    let mut todos = current_todos.todos.lock().await;
-    if let Some(pos) = todos.iter().position(|todo| todo.id.eq(&payload.todo_id)) {
-        todos.remove(pos);
+pub async fn tick_todo(State(state): State<AppState>, Json(payload): Json<TickForm>) -> Redirect {
+    if let Err(e) = &state
+        .db_pool
+        .tick_todo(payload.todo_id, state.get_current_list_string().await)
+        .await
+    {
+        eprintln!("Fehler beim Tick-Todo in der Datenbank:\n{:?}", e);
+    }
+    Redirect::to("/")
+}
+
+pub async fn delete_todo(State(state): State<AppState>, Json(payload): Json<TickForm>) -> Redirect {
+    if let Err(e) = &state
+        .db_pool
+        .remove_todo(state.get_current_list_string().await, payload.todo_id)
+        .await
+    {
+        eprintln!("Fehler beim Delete-Todo in der Datenbank:\n{:?}", e);
     }
     Redirect::to("/")
 }
@@ -315,10 +317,16 @@ pub async fn update_todo_name(
     State(state): State<AppState>,
     Json(payload): Json<UpdateTodoNameForm>,
 ) -> Redirect {
-    let current_todos = state.get_current_list().await; // Aktuelle Liste holen
-    let mut todos = current_todos.todos.lock().await; // To-dos aus aktueller Liste holen
-    if let Some(todo) = todos.iter_mut().find(|t| t.id.eq(&payload.todo_id)) {
-        todo.update_title(payload.todo_name);
+    if let Err(e) = &state
+        .db_pool
+        .update_todo_name(
+            payload.todo_name,
+            payload.todo_id,
+            state.get_current_list_string().await,
+        )
+        .await
+    {
+        eprintln!("Fehler beim Update-Name-Todo in der Datenbank:\n{:?}", e);
     }
     Redirect::to("/")
 }
@@ -327,66 +335,90 @@ pub async fn update_todo_description(
     State(state): State<AppState>,
     Json(payload): Json<UpdateTodoDescriptionForm>,
 ) -> Redirect {
-    let current_todos = state.get_current_list().await; // Aktuelle Liste holen
-    let mut todos = current_todos.todos.lock().await; // To-dos aus aktueller Liste holen
-    if let Some(todo) = todos.iter_mut().find(|t| t.id.eq(&payload.todo_id)) {
-        todo.update_description(payload.todo_description);
+    if let Err(e) = &state
+        .db_pool
+        .update_todo_description(
+            Some(payload.todo_description),
+            payload.todo_id,
+            state.get_current_list_string().await,
+        )
+        .await
+    {
+        eprintln!(
+            "Fehler beim Update-Description-Todo in der Datenbank:\n{:?}",
+            e
+        );
     }
     Redirect::to("/")
 }
 
-async fn update_due_date(
+pub async fn update_due_date(
     State(state): State<AppState>,
     Form(input): Form<DueDateForm>,
 ) -> Redirect {
     let naive_dt = NaiveDateTime::parse_from_str(&input.due_date, "%Y-%m-%dT%H:%M");
     if let Ok(dt) = naive_dt {
         let utc_dt = dt.and_utc();
-
-        let current_todos = state.get_current_list().await;
-        let mut todos = current_todos.todos.lock().await;
-        if let Some(todo) = todos.iter_mut().find(|t| t.id == input.todo_id) {
-            todo.due_date = Some(utc_dt);
+        if let Err(e) = &state
+            .db_pool
+            .update_due_date(utc_dt, input.todo_id, state.get_current_list_string().await)
+            .await
+        {
+            eprintln!(
+                "Fehler beim update-todo-due_date in der Datenbank:\n{:?}",
+                e
+            );
         }
     }
     Redirect::to("/")
 }
 
-async fn update_list_title(
+pub async fn update_list_title(
     State(state): State<AppState>,
     Json(payload): Json<TitleUpdateForm>,
 ) -> Redirect {
-    let current_list_id = state.current_list_id.lock().await.clone();
-    let lists = state.lists.lock().await;
-    if let Some(current_todo_list) = lists.get(&current_list_id) {
-        current_todo_list.change_title(payload.title).await;
-    } else {
-        println!("Liste mit ID '{}' nicht gefunden!", current_list_id);
+    if let Err(e) = &state
+        .db_pool
+        .update_list_title(state.get_current_list_string().await, payload.title)
+        .await
+    {
+        eprintln!("Fehler beim Update-List-Title in der Datenbank:\n{:?}", e);
+    }
+    Redirect::to("/")
+}
+
+// TODO: db integration
+pub async fn switch_list(
+    State(state): State<AppState>,
+    Json(payload): Json<SwitchListForm>,
+) -> Redirect {
+    // let list = state.db_pool.get_list_by_string(payload.list_name).await.unwrap_or(None);
+    let list_id = state
+        .db_pool
+        .get_list_id_by_name(payload.list_name)
+        .await
+        .unwrap_or(None);
+    {
+        if let Some(id) = list_id {
+            *state.current_list_id.lock().await = id;
+        }
     }
 
     Redirect::to("/")
 }
 
-pub async fn switch_list(
-    State(state): State<AppState>,
-    Json(payload): Json<SwitchListForm>,
-) -> Redirect {
-    if let Some(new_id) = state.find_list_id_by_name(payload.list_name.as_str()).await {
-        *state.current_list_id.lock().await = new_id;
-    }
-    Redirect::to("/")
+#[allow(dead_code)]
+pub async fn get_current_list(session: ReadableSession) -> Option<String> {
+    session.get::<String>("current_list_id")
 }
 
 pub async fn add_list(
     State(state): State<AppState>,
     Json(payload): Json<CreateListForm>,
 ) -> Redirect {
-    if !state.get_titles().await.contains(&payload.list_name) {
-        let new_list = TodoList::new(payload.list_name);
-        state.lists.lock().await.insert(
-            new_list.clone().id.lock().await.to_string(),
-            Arc::new(new_list),
-        );
+    let list = FrontendList::new(payload.list_name);
+    if let Err(e) = &state.db_pool.add_list(list.id, list.title).await {
+        eprintln!("Fehler beim list-add in der Datenbank:\n{:?}", e);
     }
     Redirect::to("/")
 }
@@ -395,14 +427,10 @@ pub async fn delete_list(
     State(state): State<AppState>,
     Json(payload): Json<RemoveListForm>,
 ) -> Redirect {
-    let mut lists = state.lists.lock().await;
-    if lists.values().len() >= 2 {
-        lists.remove(&payload.list_id);
-        let new_list_id = lists.keys().next().unwrap().clone();
-        drop(lists);
-
-        let mut current_list_id = state.current_list_id.lock().await;
-        *current_list_id = new_list_id;
+    if let Err(e) = &state.db_pool.remove_list(payload.list_id).await {
+        eprintln!("Fehler beim list-remove in der Datenbank:\n{:?}", e);
+    } else {
+        *state.current_list_id.lock().await = state.db_pool.get_lists().await.unwrap().first().unwrap().id.clone();
     }
     Redirect::to("/")
 }
@@ -411,60 +439,65 @@ pub async fn rename_tag(
     State(state): State<AppState>,
     Json(payload): Json<RenameTagForm>,
 ) -> Redirect {
-    if let Some(tag) = state.tags.write().await.get_mut(&payload.tag_id) {
-        tag.lock().await.change_name(payload.tag_name);
-    } else {
-        eprintln!(
-            "Der folgende Tag konnte nicht umbenannt werden: {}",
-            payload.tag_id
-        );
+    if let Err(e) = &state
+        .db_pool
+        .rename_tag(payload.tag_id, payload.tag_name)
+        .await
+    {
+        eprintln!("Fehler beim Rename-Tag in der Datenbank:\n{:?}", e);
     }
     Redirect::to("/")
 }
 
-pub async fn remove_tag(
+#[allow(dead_code)]
+pub async fn remove_entire_tag(
     State(state): State<AppState>,
     Json(payload): Json<RemoveTagForm>,
 ) -> Redirect {
+    if let Err(e) = state.db_pool.remove_tag(payload.tag_id).await {
+        eprintln!("Fehler beim Löschen eines Tags:\n{:?}", e);
+    }
+    Redirect::to("/")
+}
+
+pub async fn remove_tag_from_todo(
+    State(state): State<AppState>,
+    Json(payload): Json<RemoveTagForm>,
+) -> Redirect {
+    if let Err(e) = state
+        .db_pool
+        .remove_link(payload.todo_id, payload.tag_id)
+        .await
     {
-        let todos_with_tag = state.get_todos_for_tag(payload.tag_id.clone(), None).await;
-        if todos_with_tag.len().lt(&2) {
-            state.tags.write().await.remove(&payload.tag_id);
-        }
+        eprintln!("Fehler beim Entfernen eines Tags von einemTodo:\n{:?}", e);
     }
-    let current_list = state.get_current_list().await;
-    let mut todos = current_list.todos.lock().await;
-    for todo in todos.iter_mut() {
-        if todo.id == payload.todo_id && todo.tags.contains(&payload.tag_id) {
-            todo.remove_tag(&payload.tag_id);
-        }
-    }
+
     Redirect::to("/")
 }
 
 pub async fn add_tag(State(state): State<AppState>, Json(payload): Json<AddTagForm>) -> Redirect {
-    if payload.tag_name.is_empty() {
+    let trimmed_string = payload.tag_name.trim().to_lowercase();
+    if trimmed_string.is_empty() {
         return Redirect::to("/");
     };
-    let searched_tag = state.get_tag_from_name(payload.tag_name.clone()).await;
-
-    // Wenn Tag nicht existiert, neuen Tag erstellen und in den globalen Tag-Manager einfügen
-    let tag_id = if let None = searched_tag {
-        let new_tag = Tag::new(payload.tag_name.clone(), Local::now());
-        {
-            let mut tags = state.tags.write().await;
-            tags.insert(new_tag.id.clone(), Arc::new(Mutex::new(new_tag.clone())));
+    let tag_id: TagId = if let Some(tag) = state
+        .db_pool
+        .get_tag_by_name(trimmed_string.clone())
+        .await
+        .unwrap()
+    {
+        tag.id
+    } else {
+        let new_tag = Tag::new(trimmed_string, Utc::now());
+        if let Err(e) = state.db_pool.add_tag_uniq(&new_tag).await {
+            eprintln!("Fehler beim Hinzufügen eines Tags:\n{:?}", e);
         }
         new_tag.id
-    } else {
-        searched_tag.unwrap().lock().await.id.clone()
     };
 
-    state
-        .with_todo_mut(payload.todo_id, |todo| {
-            todo.add_tag(tag_id.clone());
-        })
-        .await;
+    if let Err(e) = state.db_pool.link_todo_tag(payload.todo_id, tag_id).await {
+        eprintln!("Fehler beim Linken von Todo und Tag:\n{:?}", e);
+    }
 
     Redirect::to("/")
 }
@@ -473,38 +506,30 @@ pub async fn todos(
     State(state): State<AppState>,
     Query(filters): Query<AllFilters>,
 ) -> Html<String> {
-    /*if !filters.list.is_empty() {
-        let current_id = state.get_list_id(filters.list.clone()).await.unwrap_or_default();
-        if state.lists.lock().await.keys().collect::<Vec<&TodoListId>>().contains(&&current_id) {
-            *state.current_list_id.lock().await = current_id;
-        }
-    }*/
+    let current_list_id = state.get_current_list_string().await;
 
-    let current_list = state.get_current_list().await;
-    let mut updated_todos = current_list.todos.lock().await.clone();
+    let mut todos = state
+        .db_pool
+        .get_todos(current_list_id.clone())
+        .await
+        .unwrap_or(Vec::new());
 
-    for todo in &mut updated_todos {
+    for todo in &mut todos {
         todo.check_overdue();
     }
 
-    let tags: Vec<Tag> = {
-        let tags_guard = state.tags.read().await;
-        let tag_futures = tags_guard
-            .values()
-            .map(|tag| async { tag.lock().await.clone() });
-        let tags_vec = join_all(tag_futures).await;
-        tags_vec.into_iter().collect()
-    };
+    let tags = state.db_pool.get_tags().await.unwrap();
+    let title = state
+        .db_pool
+        .get_list(current_list_id.clone())
+        .await
+        .unwrap_or_default();
+    let lists = state.db_pool.get_lists_string().await.unwrap_or_default();
 
-    let filtered_todos = filter(&filters, &updated_todos, &tags);
+    // TODO Filter müssen an Datenbank angepasst werden
+    let filtered_todos = filter(&filters, &todos, &tags);
+    // TODO wirft einen Fehler wegen Option Unwrap
     let frontend_todos = state.get_todos_with_tags(filtered_todos).await;
-
-    let title = {
-        let title_lock = current_list.title.lock().await;
-        title_lock.clone()
-    };
-    let todo_lists = state.get_titles().await;
-    let current_list_id = state.current_list_id.lock().await.clone();
 
     // HTML parsen
     let mut tera = Tera::new("src/templates/**/*").unwrap();
@@ -512,7 +537,7 @@ pub async fn todos(
     let mut context = Context::new();
     context.insert("title", &title);
     context.insert("list_id", &current_list_id);
-    context.insert("lists", &todo_lists);
+    context.insert("lists", &lists);
     context.insert("todos", &frontend_todos);
     context.insert("tags", &tags);
 
@@ -520,11 +545,6 @@ pub async fn todos(
     Html(rendered)
 }
 
-pub fn json_encode_single(value: &Value, _args: &HashMap<String, Value>) -> TeraResult<Value> {
-    let json_str = serde_json::to_string(value).map_err(|e| tera::Error::msg(e.to_string()))?;
-    let single_quoted = json_str.replace("\"", "'");
-    Ok(Value::String(single_quoted))
-}
 
 //noinspection ALL
 pub async fn routes() -> Router {
@@ -537,32 +557,79 @@ pub async fn routes() -> Router {
 
     let app_state = AppState::new(pool).await;
 
+    // Debugging für Zurücksetzen
+    let result = &app_state.db_pool.clear_all_tables().await;
+    if let Err(e) = result {
+        eprintln!("Fehler beim Zurücksetzen der Datenbank:\n{:?}", e);
+    }
+
     let current_list_id = async {
         let current_id_lock = app_state.current_list_id.lock().await;
         current_id_lock.clone()
-    };
+    }
+    .await;
+
+    let current_list = app_state.get_current_list().await;
+    // Für Datenbank Error fixen
+    if let Err(e) = app_state
+        .db_pool
+        .add_list_uniq(
+            current_list.id.lock().await.clone(),
+            current_list.title.lock().await.clone(),
+        )
+        .await
+    {
+        eprintln!(
+            "Fehler beim Hinzufügen der ersten Liste in die Datenbank:\n{:?}",
+            e
+        );
+    }
 
     async {
+        let first_todo = Todo::new(
+            Uuid::new_v4(),
+            "X aufkaufen",
+            None,
+            true,
+        );
+        let second_todo = Todo::new(
+            Uuid::new_v4(),
+            "Kaffee kochen",
+            Some("Filterkaffee..."),
+            false,
+        );
+
+        if let Err(result) = &app_state
+            .db_pool
+            .add_todo(&first_todo, current_list_id.clone())
+            .await
+        {
+            eprintln!(
+                "Fehler beim einsetzen des To-dos zur Initialisierung{:?}",
+                result
+            );
+        }
+        if let Err(result) = &app_state
+            .db_pool
+            .add_todo(&second_todo, current_list_id.clone())
+            .await
+        {
+            eprintln!(
+                "Fehler beim einsetzen des To-dos zur Initialisierung{:?}",
+                result
+            );
+        }
+
         let mut lists = app_state.lists.lock().await;
-        if let Some(list) = lists.get_mut(&current_list_id.await) {
+        if let Some(list) = lists.get_mut(&current_list_id) {
             let mut todos = list.todos.lock().await;
-            todos.extend(vec![
-                Todo::new(
-                    Uuid::new_v4().to_string(),
-                    "X aufkaufen".to_string(),
-                    None,
-                    true,
-                ),
-                Todo::new(
-                    Uuid::new_v4().to_string(),
-                    "Kaffee kochen".to_string(),
-                    Some("Filterkaffee...".to_string()),
-                    false,
-                ),
-            ]);
+            todos.extend(vec![first_todo, second_todo]);
         }
     }
     .await;
+
+    let store = MemoryStore::new();
+    let session_layer = SessionLayer::new(store, b"N6dXavyE/U6IIoELbOwjDG9y47cpE9opfMQAlJmc1BgW1FaJq7orcWxec2ubuDJgZLjJjzCv1IQzxkGvwaAEs++HP8qmizMfOF3L3Ao/TLI=");
 
     Router::new()
         .route("/", get(todos))
@@ -571,35 +638,40 @@ pub async fn routes() -> Router {
         .route("/tick_todo", post(tick_todo))
         .route("/update_todo_name", post(update_todo_name))
         .route("/update_todo_date", post(update_due_date))
-        .route("/update_todo_description", post(update_todo_description))
+        .route(
+            "/update_todo_description",
+            post(update_todo_description),
+        )
         .route("/add_list", post(add_list))
         .route("/delete_list", post(delete_list))
         .route("/switch_list", post(switch_list))
         .route("/update_list_title", post(update_list_title))
         .route("/add_tag", post(add_tag))
-        .route("/remove_tag", post(remove_tag))
+        .route("/remove_tag", post(remove_tag_from_todo))
         .route("/rename_tag", post(rename_tag))
         .with_state(app_state)
+        .layer(session_layer)
 }
 
 #[allow(dead_code)]
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
     use super::*;
+    use chrono::NaiveDateTime;
+    use crate::todos::filter::*;
 
     async fn todos_setup() -> TodoList {
-        let list = TodoList::new("New List".to_string());
+        let list = TodoList::new("New List");
         let first_todo = Todo::new(
-            "1".to_string(),
-            "First Todo".to_string(),
-            Some("This is the description of the first todo".to_string()),
+            Uuid::new_v4(),
+            "First Todo",
+            Some("This is the description of the first todo"),
             false,
         );
         let second_todo = Todo::new(
-            "2".to_string(),
-            "Second Todo".to_string(),
-            Some("This is the description of the second todo".to_string()),
+            Uuid::new_v4(),
+            "Second Todo",
+            Some("This is the description of the second todo"),
             true,
         );
 
@@ -611,25 +683,23 @@ mod tests {
     fn todos_vec_setup() -> Vec<Todo> {
         let first_tag = Tag::new(
             "Wonderful Tag Name".to_string(),
-            Local
-                .from_local_datetime(
-                    &NaiveDateTime::parse_from_str("2022-04-13 00:00:00", "%Y-%m-%d %H:%M:%S")
-                        .unwrap(),
-                )
-                .unwrap(),
+            DateTime::<Utc>::from_naive_utc_and_offset(
+                NaiveDateTime::parse_from_str("2022-04-13 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap(),
+                Utc,
+            ),
         );
 
         let mut list = Vec::new();
         let first_todo = Todo::new(
-            "1".to_string(),
-            "First Todo".to_string(),
-            Some("This is the description of the first todo".to_string()),
+            Uuid::new_v4(),
+            "First Todo",
+            Some("This is the description of the first todo"),
             false,
         );
         let mut second_todo = Todo::new(
-            "2".to_string(),
-            "Second Todo".to_string(),
-            Some("This is the description of the second todo".to_string()),
+            Uuid::new_v4(),
+            "Second Todo",
+            Some("This is the description of the second todo"),
             true,
         );
         second_todo.tags.push(first_tag.id);
@@ -641,36 +711,32 @@ mod tests {
     fn test_filter_by_tags() {
         let first_tag = Tag::new(
             "Wonderful Tag Name".to_string(),
-            Local
-                .from_local_datetime(
-                    &NaiveDateTime::parse_from_str("2022-04-13 00:00:00", "%Y-%m-%d %H:%M:%S")
-                        .unwrap(),
-                )
-                .unwrap(),
+            DateTime::<Utc>::from_naive_utc_and_offset(
+                NaiveDateTime::parse_from_str("2022-04-13 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap(),
+                Utc,
+            ),
         );
         let second_tag = Tag::new(
             "Amazing second Tag Name".to_string(),
-            Local
-                .from_local_datetime(
-                    &NaiveDateTime::parse_from_str("2025-04-16 00:00:00", "%Y-%m-%d %H:%M:%S")
-                        .unwrap(),
-                )
-                .unwrap(),
+            DateTime::<Utc>::from_naive_utc_and_offset(
+                NaiveDateTime::parse_from_str("2025-04-16 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap(),
+                Utc,
+            ),
         );
         let available_tags = vec![first_tag.clone(), second_tag].into_iter().collect();
 
         // To-dos vorbereiten
         let mut list = Vec::new();
         let first_todo = Todo::new(
-            "1".to_string(),
-            "First Todo".to_string(),
-            Some("This is the description of the first todo".to_string()),
+            Uuid::new_v4(),
+            "First Todo",
+            Some("This is the description of the first todo"),
             false,
         );
         let mut second_todo = Todo::new(
-            "2".to_string(),
-            "Second Todo".to_string(),
-            Some("This is the description of the second todo".to_string()),
+            Uuid::new_v4(),
+            "Second Todo",
+            Some("This is the description of the second todo"),
             true,
         );
         second_todo.tags.push(first_tag.id);
