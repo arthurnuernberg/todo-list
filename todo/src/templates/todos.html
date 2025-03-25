@@ -222,6 +222,42 @@
                     <button id="{{todo.id}}-add-tag-button" class="add-tag-button" type="button" onclick="addTag('{{ todo.id }}', document.getElementById('{{todo.id}}-add_todo').value)">Tag hinzufügen</button>
                 </div>
             </div>
+            <!-- Subtask hinzufügen -->
+            <div class="subtask-adder">
+                <input type="text" id="subtask-input-{{ todo.id }}" placeholder="Neuen Subtask hinzufügen..." />
+                <button onclick="addSubTodo('{{ todo.id }}', document.getElementById('subtask-input-{{ todo.id }}').value)">Subtask hinzufügen</button>
+            </div>
+
+            <hr style="border: none; height: 4px; background-color: #ccc; margin-bottom: 10px;">
+            <!-- Subtasks Container -->
+            {% if todo.subtasks %}
+            <div class="subtasks-container" style="margin-top: 10px; padding-left: 20px;"> <!-- border-left: 2px solid #ccc -->
+                <!-- <h4 style="margin: 0 0 5px 0;">Subtasks:</h4> -->
+                <ul class="subtasks-list" style="list-style-type: none; padding: 0;">
+                    {% for subtask in todo.subtasks %}
+                    <li class="subtask-item" id="subtask-{{ subtask.id }}" style="margin-bottom: 5px;">
+                        <div class="subtask" style="display: flex; align-items: center;">
+                            <input type="checkbox"
+                                   onchange="tickTodo('{{ subtask.id }}')"
+                                   {% if subtask.completed %}checked{% endif %}>
+                            <span class="subtask-title editable"
+                                  contenteditable="true"
+                                  onblur="if (this.textContent.trim() !== this.dataset.originalValue) updateTodoName('{{ subtask.id }}', this.textContent.trim())"
+                                  onfocus="this.dataset.originalValue = this.textContent.trim()"
+                                  style="margin-left: 5px;">
+                                {{ subtask.title }}
+                            </span>
+                            <button type="button"
+                                    onclick="deleteTodo('{{ subtask.id }}')"
+                                    style="background-color: #e74c3c; border: none; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.9rem; cursor: pointer; transition: background-color 0.3s;">
+                                &#128465;
+                            </button>
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
         </div>
     </li>
     {% endfor %}

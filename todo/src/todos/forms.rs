@@ -1,9 +1,9 @@
-use crate::todos::todos::Tag;
+use crate::todos::todos::{Tag, TodoId};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{de, Deserialize, Deserializer, Serialize};
 use std::hash::{Hash, Hasher};
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FrontendTodo {
     pub id: String,
     pub title: String,
@@ -13,6 +13,8 @@ pub struct FrontendTodo {
     pub completed: bool,
     pub is_overdue: bool,
     pub tags: Vec<Tag>,
+    pub parent_id: Option<TodoId>,
+    pub subtasks: Vec<FrontendTodo>
 }
 
 impl Hash for FrontendTodo {
@@ -106,6 +108,11 @@ pub struct TickForm {
 }
 
 #[derive(Deserialize)]
+pub struct RemoveTodoForm {
+    pub todo_id: String,
+}
+
+#[derive(Deserialize)]
 pub struct UpdateTodoNameForm {
     pub todo_id: String,
     pub todo_name: String,
@@ -119,6 +126,12 @@ pub struct UpdateTodoDescriptionForm {
 #[derive(Deserialize)]
 pub struct NewTodoForm {
     pub todo_title: String,
+}
+
+#[derive(Deserialize)]
+pub struct NewSubTodoForm {
+    pub sub_todo_title: String,
+    pub todo_id: String,
 }
 
 #[derive(Deserialize)]
@@ -147,13 +160,6 @@ pub struct RemoveListForm {
     pub list_id: String,
 }
 
-#[allow(dead_code)]
-#[derive(Deserialize)]
-pub struct SingleStringForm {
-    pub string: String,
-}
-
-#[allow(dead_code)]
 #[derive(Deserialize)]
 pub struct RenameTagForm {
     pub tag_id: String,
@@ -169,4 +175,9 @@ pub struct RemoveTagForm {
 pub struct AddTagForm {
     pub todo_id: String,
     pub tag_name: String,
+}
+
+#[derive(Deserialize)]
+pub struct RemoveDueDateForm {
+    pub todo_id: TodoId,
 }

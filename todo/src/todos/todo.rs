@@ -14,6 +14,8 @@ pub struct Todo {
     pub completed: bool,
     pub is_overdue: bool,
     pub tags: Vec<TagId>,
+    pub parent_id: Option<String>,
+    pub subtasks: Vec<Todo>,
 }
 
 impl Todo {
@@ -27,6 +29,8 @@ impl Todo {
             completed,
             is_overdue: false,
             tags: Vec::new(),
+            parent_id: None,
+            subtasks: Vec::new()
         }
     }
 
@@ -118,6 +122,8 @@ mod tests {
             completed: false,
             is_overdue: false,
             tags: Vec::new(),
+            parent_id: None,
+            subtasks: Vec::new()
         };
         new_todo.check_overdue();
         assert_eq!(new_todo.is_overdue, true);

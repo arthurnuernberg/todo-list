@@ -138,6 +138,28 @@ async function addTodo(name) {
     }
 }
 
+async function addSubTodo(todoId, subTodoName) {
+    try {
+        const response = await fetch('/add_sub_todo', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                sub_todo_title: subTodoName,
+                todo_id: todoId,
+            }),
+        });
+
+        if (!response.ok) {
+            console.error('Fehler beim Erstellen des Sub-To-dos:', response.statusText);
+        }
+        window.location.reload();
+    } catch (error) {
+        console.error('Fehler beim Senden der Anfrage:', error);
+    }
+}
+
 async function tickTodo(todoId) {
     try {
         const response = await fetch('/tick_todo', {

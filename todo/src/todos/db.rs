@@ -1,25 +1,25 @@
+use crate::todos::db::conversions::*;
 use crate::todos::forms::FrontendTodo;
 use crate::todos::todo::Todo;
-use crate::todos::todos::{Tag, TagId, TodoId, TodoList, TodoListId};
+use crate::todos::todos::{Tag, TagId, TodoId, TodoListId};
 use async_trait::async_trait;
-use chrono::{DateTime, NaiveDateTime, Utc};
-use futures::future::join_all;
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde::Serialize;
 use sqlx::{Error, PgPool};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use uuid::Uuid;
-
-pub struct DBList {
-    id: String,
-    title: String,
-}
+use crate::todos::filter::sorting::sort_by_date;
 
 #[async_trait]
 pub trait TodoDatabaseExt {
     async fn clear_all_tables(&self) -> Result<(), Error>;
     async fn add_todo(&self, todo: &Todo, list_id: TodoListId) -> Result<(), Error>;
+    async fn add_subtodo(
+        &self,
+        todo: &Todo,
+        parent_id: TodoId,
+        list_id: TodoListId,
+    ) -> Result<(), Error>;
     async fn tick_todo(&self, list_id: TodoListId, todo_id: TodoId) -> Result<(), Error>;
     async fn remove_todo(&self, list_id: TodoListId, todo_id: TodoId) -> Result<(), Error>;
     async fn update_todo_name(
@@ -40,10 +40,13 @@ pub trait TodoDatabaseExt {
         todo_id: TodoId,
         list_id: TodoListId,
     ) -> Result<(), Error>;
+    async fn remove_due_date(&self, todo_id: TodoId) -> Result<(), Error>;
     async fn rename_tag(&self, tag_name: String, tag_id: TagId) -> Result<(), Error>;
     async fn remove_tag(&self, tag_id: TagId) -> Result<(), Error>;
     async fn add_tag(&self, tag: &Tag) -> Result<(), Error>;
     async fn add_tag_uniq(&self, tag: &Tag) -> Result<(), Error>;
+    async fn find_subtasks(&self, todo_id: TodoId) -> Result<Vec<Todo>, Error>;
+    async fn find_tags_for_todo(&self, todo_id: TodoId) -> Result<Vec<TagId>, Error>;
     async fn link_todo_tag(&self, todo_id: TodoId, tag_id: TagId) -> Result<(), Error>;
     async fn remove_link(&self, todo_id: TodoId, tag_id: TagId) -> Result<(), Error>;
     async fn update_list_title(&self, list_id: TodoListId, list_name: String) -> Result<(), Error>;
@@ -51,7 +54,9 @@ pub trait TodoDatabaseExt {
     async fn add_list_uniq(&self, list_id: TodoListId, list_name: String) -> Result<(), Error>;
     async fn remove_list(&self, list_id: TodoListId) -> Result<(), Error>;
     async fn get_todos(&self, list_id: TodoListId) -> Result<Vec<Todo>, Error>;
-    async fn get_frontend_todos(&self, list_id: TodoListId) -> Result<Vec<FrontendTodo>, Error>;
+    async fn get_main_todos(&self, list_id: TodoListId) -> Result<Vec<Todo>, Error>;
+    async fn get_tags_for_tag_ids(&self, tag_ids: Vec<TagId>) -> Vec<Tag>;
+    async fn get_frontend_todos(&self, todos: Vec<Todo>) -> Result<Vec<FrontendTodo>, Error>;
     async fn get_todo(&self, todo_id: TodoId) -> Result<Todo, Error>;
     async fn get_tag(&self, tag_id: TagId) -> Result<Option<Tag>, Error>;
     async fn get_tag_by_name(&self, tag_name: String) -> Result<Option<Tag>, Error>;
@@ -102,8 +107,8 @@ impl TodoDatabaseExt for PgPool {
             list_id,
             todo.title,
             todo.description,
-            todo.due_date.map(conversions::to_offset),
-            conversions::to_offset(todo.created_at),
+            todo.due_date.map(to_offset),
+            to_offset(todo.created_at),
             todo.completed,
             todo.is_overdue,
         )
@@ -123,6 +128,28 @@ impl TodoDatabaseExt for PgPool {
             .execute(self)
             .await?;
         }
+
+        Ok(())
+    }
+
+    async fn add_subtodo(
+        &self,
+        todo: &Todo,
+        parent_id: TodoId,
+        list_id: TodoListId,
+    ) -> Result<(), Error> {
+        self.add_todo(todo, list_id).await?;
+        sqlx::query!(
+            r#"
+                UPDATE todos
+                SET parent_id = $1
+                WHERE id = $2
+            "#,
+            parent_id,
+            todo.id
+        )
+        .execute(self)
+        .await?;
 
         Ok(())
     }
@@ -214,9 +241,24 @@ impl TodoDatabaseExt for PgPool {
             SET due_date = $1
             WHERE id = $2 AND list_id = $3
         "#,
-            conversions::to_offset(due_date),
+            to_offset(due_date),
             todo_id,
             list_id
+        )
+        .execute(self)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn remove_due_date(&self, todo_id: TodoId) -> Result<(), Error> {
+        sqlx::query!(
+            r#"
+                UPDATE todos
+                SET due_date = NULL
+                WHERE id = $1
+            "#,
+            todo_id
         )
         .execute(self)
         .await?;
@@ -268,7 +310,7 @@ impl TodoDatabaseExt for PgPool {
         "#,
             tag.id,
             tag.name,
-            conversions::to_offset(tag.created_at)
+            to_offset(tag.created_at)
         )
         .execute(self)
         .await?;
@@ -285,12 +327,56 @@ impl TodoDatabaseExt for PgPool {
         "#,
             tag.id,
             tag.name,
-            conversions::to_offset(tag.created_at)
+            to_offset(tag.created_at)
         )
         .execute(self)
         .await?;
 
         Ok(())
+    }
+
+    async fn find_subtasks(&self, todo_id: TodoId) -> Result<Vec<Todo>, Error> {
+        let rows = sqlx::query!(
+            r#"
+        SELECT * FROM todos
+        WHERE parent_id = $1
+        "#,
+            todo_id
+        )
+        .fetch_all(self)
+        .await?;
+
+        let mut todos = Vec::with_capacity(rows.len());
+        for row in rows {
+            let tags = self.find_tags_for_todo(row.id.clone()).await?;
+            let subtasks = self.find_subtasks(row.id.clone()).await?;
+            todos.push(Todo {
+                id: row.id,
+                title: row.title,
+                description: row.description,
+                due_date: row.due_date.map(to_utc),
+                created_at: to_utc(row.created_at),
+                completed: row.completed,
+                is_overdue: row.is_overdue,
+                parent_id: row.parent_id,
+                tags,
+                subtasks,
+            });
+        }
+        Ok(todos)
+    }
+
+    async fn find_tags_for_todo(&self, todo_id: TodoId) -> Result<Vec<TagId>, Error> {
+        sqlx::query!(
+            r#"
+                SELECT tag_id FROM todo_tags
+                WHERE todo_id = $1
+            "#,
+            todo_id
+        )
+        .map(|r| r.tag_id)
+        .fetch_all(self)
+        .await
     }
 
     async fn link_todo_tag(&self, todo_id: TodoId, tag_id: TagId) -> Result<(), Error> {
@@ -394,7 +480,8 @@ impl TodoDatabaseExt for PgPool {
             description,
             due_date,
             created_at,
-            completed
+            completed,
+            parent_id
         FROM todos_db.public.todos
         WHERE list_id = $1
         ORDER BY created_at DESC
@@ -422,11 +509,11 @@ impl TodoDatabaseExt for PgPool {
             .map(|t| t.tag_id)
             .collect();
 
-            let created_at = conversions::to_utc(row.created_at);
+            let created_at = to_utc(row.created_at);
 
             let mut due_date: Option<DateTime<Utc>> = None;
             if let Some(date) = row.due_date {
-                due_date = Some(conversions::to_utc(date));
+                due_date = Some(to_utc(date));
             }
 
             let mut todo = Todo {
@@ -438,6 +525,8 @@ impl TodoDatabaseExt for PgPool {
                 completed: row.completed,
                 is_overdue: false,
                 tags,
+                parent_id: row.parent_id,
+                subtasks: self.find_subtasks(row.id).await?,
             };
 
             todo.check_overdue();
@@ -448,31 +537,114 @@ impl TodoDatabaseExt for PgPool {
         Ok(todos)
     }
 
-    async fn get_frontend_todos(&self, list_id: TodoListId) -> Result<Vec<FrontendTodo>, Error> {
-        let todos = self.get_todos(list_id).await?;
-        let mut frontend = Vec::with_capacity(todos.len());
-        for todo in todos {
-            let tag_futures = todo
-                .tags
-                .into_iter()
-                .map(|tag_id| self.get_tag(tag_id))
-                .collect::<Vec<_>>();
-            let tag_results = join_all(tag_futures).await;
-            let mut tags = Vec::new();
-            for res in tag_results {
-                if let Some(tag) = res? {
-                    tags.push(tag);
-                }
+    async fn get_main_todos(&self, list_id: TodoListId) -> Result<Vec<Todo>, Error> {
+        // Basis-Informationen der To-dos abrufen
+        let base_todos = sqlx::query!(
+            r#"
+        SELECT
+            id,
+            title,
+            description,
+            due_date,
+            created_at,
+            completed,
+            parent_id
+        FROM todos_db.public.todos
+        WHERE list_id = $1 and parent_id IS NULL
+        ORDER BY created_at DESC
+        "#,
+            list_id
+        )
+        .fetch_all(self)
+        .await?;
+
+        let mut todos = Vec::new();
+
+        for row in base_todos {
+            // Tags für das jeweilige To-do laden
+            let tags: Vec<String> = sqlx::query!(
+                r#"
+            SELECT tag_id
+            FROM todos_db.public.todo_tags
+            WHERE todo_id = $1
+            "#,
+                row.id.to_string()
+            )
+            .fetch_all(self)
+            .await?
+            .into_iter()
+            .map(|t| t.tag_id)
+            .collect();
+
+            let created_at = to_utc(row.created_at);
+            let due_date = row.due_date.map(to_utc);
+            let subtasks = self.find_subtasks(row.id.clone()).await?;
+
+            let mut todo = Todo {
+                id: row.id.to_string(),
+                title: row.title,
+                description: row.description,
+                due_date,
+                created_at,
+                completed: row.completed,
+                is_overdue: false,
+                tags,
+                parent_id: row.parent_id,
+                subtasks,
+            };
+
+            todo.check_overdue();
+            todos.push(todo);
+        }
+
+        Ok(todos)
+    }
+
+    async fn get_tags_for_tag_ids(&self, tag_ids: Vec<TagId>) -> Vec<Tag> {
+        let tag_futures = tag_ids
+            .into_iter()
+            .map(|tag_id| self.get_tag(tag_id))
+            .collect::<Vec<_>>();
+        let results = futures::future::join_all(tag_futures).await;
+        results
+            .into_iter()
+            .filter_map(|res| res.ok().and_then(|opt_tag| opt_tag))
+            .collect()
+    }
+
+    async fn get_frontend_todos(&self, todos: Vec<Todo>) -> Result<Vec<FrontendTodo>, Error> {
+        let mut frontend = Vec::new();
+        for mut todo in todos {
+            todo.subtasks.sort_by_key(|todo| todo.created_at);
+            let tags = self.get_tags_for_tag_ids(todo.tags.clone()).await;
+            let mut sub_todos = Vec::new();
+            for sub_todo in todo.subtasks {
+                let sub_tags = self.get_tags_for_tag_ids(sub_todo.tags.clone()).await;
+                let parsed_todo = FrontendTodo {
+                    id: sub_todo.id.clone(),
+                    title: sub_todo.title.clone(),
+                    description: sub_todo.description.clone(),
+                    due_date: sub_todo.due_date.clone(),
+                    created_at: sub_todo.created_at.clone(),
+                    completed: sub_todo.completed.clone(),
+                    is_overdue: sub_todo.is_overdue.clone(),
+                    tags: sub_tags,
+                    subtasks: Vec::new(),
+                    parent_id: sub_todo.parent_id.clone(),
+                };
+                sub_todos.push(parsed_todo);
             }
             frontend.push(FrontendTodo {
-                id: todo.id,
-                title: todo.title,
-                description: todo.description,
-                due_date: todo.due_date,
-                created_at: todo.created_at,
+                id: todo.id.clone(),
+                title: todo.title.clone(),
+                description: todo.description.clone(),
+                due_date: todo.due_date.clone(),
+                created_at: todo.created_at.clone(),
                 completed: todo.completed,
                 is_overdue: todo.is_overdue,
                 tags,
+                parent_id: None,
+                subtasks: sub_todos,
             });
         }
         Ok(frontend)
@@ -481,35 +653,41 @@ impl TodoDatabaseExt for PgPool {
     async fn get_todo(&self, todo_id: TodoId) -> Result<Todo, Error> {
         let record = sqlx::query!(
             r#"
-                SELECT * FROM todos
-                WHERE id = $1
-            "#,
+        SELECT id, title, description, due_date, created_at, completed, parent_id
+        FROM todos
+        WHERE id = $1
+        "#,
             todo_id
         )
         .fetch_one(self)
         .await?;
-        let tags = sqlx::query!(
+
+        let tag_rows = sqlx::query!(
             r#"
-                SELECT * FROM tags
-                WHERE id = (SELECT tag_id FROM todo_tags
-                WHERE todo_id = $1)
-            "#,
-            todo_id
+        SELECT tag_id
+        FROM todo_tags
+        WHERE todo_id = $1
+        "#,
+            todo_id.to_string()
         )
         .fetch_all(self)
         .await?;
 
-        let tag_list: Vec<TodoId> = tags.iter().map(|rec| rec.id.clone()).collect();
+        let tags = tag_rows.into_iter().map(|r| r.tag_id).collect();
+
         let todo = Todo {
-            id: record.id,
+            id: record.id.to_string(),
             title: record.title,
             description: record.description,
-            due_date: record.due_date.map(conversions::to_utc),
-            created_at: conversions::to_utc(record.created_at),
+            due_date: record.due_date.map(to_utc),
+            created_at: to_utc(record.created_at),
             completed: record.completed,
-            is_overdue: false,
-            tags: tag_list,
+            is_overdue: false, // ggf. todo.check_overdue() danach aufrufen
+            tags,
+            parent_id: record.parent_id,
+            subtasks: self.find_subtasks(record.id).await?,
         };
+
         Ok(todo)
     }
 
@@ -526,7 +704,7 @@ impl TodoDatabaseExt for PgPool {
         Ok(record.map(|r| Tag {
             id: r.id,
             name: r.name,
-            created_at: conversions::to_utc(r.created_at),
+            created_at: to_utc(r.created_at),
         }))
     }
 
@@ -543,7 +721,7 @@ impl TodoDatabaseExt for PgPool {
         Ok(record.map(|r| Tag {
             id: r.id,
             name: r.name,
-            created_at: conversions::to_utc(r.created_at),
+            created_at: to_utc(r.created_at),
         }))
     }
 
@@ -561,7 +739,7 @@ impl TodoDatabaseExt for PgPool {
                 return Tag {
                     id: rec.id.clone(),
                     name: rec.name.clone(),
-                    created_at: conversions::to_utc(rec.created_at),
+                    created_at: to_utc(rec.created_at),
                 };
             })
             .collect();
