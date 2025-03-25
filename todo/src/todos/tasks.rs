@@ -16,9 +16,9 @@ use std::env;
 use std::hash::Hash;
 use tera::{Context, Result as TeraResult, Tera, Value};
 use uuid::Uuid;
-
+use todos::export::print_json;
 use crate::todos;
-use crate::todos::db::{FrontendList, TodoDatabaseExt};
+use crate::todos::db::TodoDatabaseExt;
 use crate::todos::filter::filter;
 use todos::forms::*;
 use todos::todo::*;
@@ -33,7 +33,7 @@ pub struct AppState {
     pub current_list_id: TodoListId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TodoList {
     pub id: TodoListId,
     pub title: String,
@@ -75,34 +75,6 @@ impl Tag {
         }
     }
 }
-
-/*pub async fn get_todos_with_tags(todos: Vec<Todo>, tags: Vec<Tag>) -> Vec<FrontendTodo> {
-    let mut frontend_todos = Vec::new();
-    for todo in todos.iter().cloned() {
-        let mut todo_tags = Vec::new();
-        for tag_id in todo.tags.iter() {
-            let found_tag =
-                tags
-                .get(tag_id)
-                .unwrap()
-                .lock()
-                .await
-                .clone();
-            todo_tags.push(found_tag);
-        }
-        frontend_todos.push(FrontendTodo {
-            id: todo.id,
-            title: todo.title,
-            due_date: todo.due_date,
-            description: todo.description,
-            created_at: todo.created_at,
-            completed: todo.completed,
-            is_overdue: todo.is_overdue,
-            tags: todo_tags,
-        });
-    }
-    frontend_todos
-}*/
 
 pub async fn new_todo(State(state): State<AppState>, Json(payload): Json<NewTodoForm>) -> Redirect {
     if payload.todo_title.is_empty() {
@@ -271,7 +243,7 @@ pub async fn add_list(
     State(state): State<AppState>,
     Json(payload): Json<CreateListForm>,
 ) -> Redirect {
-    let list = FrontendList::new(payload.list_name);
+    let list = TodoList::new(payload.list_name.as_str());
     if let Err(e) = &state.db_pool.add_list(list.id, list.title).await {
         eprintln!("Fehler beim list-add in der Datenbank:\n{:?}", e);
     }
@@ -287,7 +259,7 @@ pub async fn delete_list(
     } else {
         state.current_list_id = state
             .db_pool
-            .get_lists()
+            .get_frontend_lists()
             .await
             .unwrap()
             .first()
@@ -384,10 +356,10 @@ pub async fn todos(
     let tags = state.db_pool.get_tags().await.unwrap();
     let title = state
         .db_pool
-        .get_list(current_list_id.clone())
+        .get_list_title(current_list_id.clone())
         .await
         .unwrap_or_default();
-    let lists = state.db_pool.get_lists_string().await.unwrap_or_default();
+    let lists_strings = state.db_pool.get_lists_string().await.unwrap_or_default();
 
     let filtered_todos = filter(&filters, &todos, &tags);
     // TODO wirft einen Fehler wegen Option Unwrap (wahrscheinlich wegen Tags)
@@ -403,10 +375,15 @@ pub async fn todos(
     let mut context = Context::new();
     context.insert("title", &title);
     context.insert("list_id", &current_list_id);
-    context.insert("lists", &lists);
+    context.insert("lists", &lists_strings);
     context.insert("todos", &frontend_todos);
     context.insert("tags", &tags);
 
+    let lists = state.db_pool.get_frontend_lists().await.unwrap();
+    println!();println!();
+    print_json(&lists, &tags);
+    println!();println!();
+    todos::export::export_file(&lists, &tags);
     let rendered = tera.render("todos.html", &context).unwrap();
     Html(rendered)
 }

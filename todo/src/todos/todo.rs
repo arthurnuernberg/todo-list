@@ -1,5 +1,5 @@
 use uuid::Uuid;
-use crate::todos::todos::TagId;
+use crate::todos::tasks::TagId;
 use chrono::{Local, DateTime};
 use serde::{Deserialize, Serialize};
 use chrono::Utc;

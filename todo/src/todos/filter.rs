@@ -1,6 +1,6 @@
 use crate::todos::forms::AllFilters;
 use crate::todos::todo::Todo;
-use crate::todos::todos::Tag;
+use crate::todos::tasks::Tag;
 use chrono::NaiveDateTime;
 use sorting::*;
 

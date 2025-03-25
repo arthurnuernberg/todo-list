@@ -1,6 +1,6 @@
 mod todos;
+mod lib;
 
-use std::env;
 use std::net::SocketAddr;
 use axum::http::StatusCode;
 use axum::routing::get_service;

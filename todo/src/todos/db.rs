@@ -1,14 +1,14 @@
+use crate::todos::tasks::TodoList;
 use crate::todos::db::conversions::*;
 use crate::todos::forms::FrontendTodo;
 use crate::todos::todo::Todo;
-use crate::todos::todos::{Tag, TagId, TodoId, TodoListId};
+use crate::todos::tasks::{Tag, TagId, TodoId, TodoListId};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde::Serialize;
 use sqlx::{Error, PgPool};
 use uuid::Uuid;
-use crate::todos::filter::sorting::sort_by_date;
 
 #[async_trait]
 pub trait TodoDatabaseExt {
@@ -61,10 +61,10 @@ pub trait TodoDatabaseExt {
     async fn get_tag(&self, tag_id: TagId) -> Result<Option<Tag>, Error>;
     async fn get_tag_by_name(&self, tag_name: String) -> Result<Option<Tag>, Error>;
     async fn get_tags(&self) -> Result<Vec<Tag>, Error>;
-    async fn get_list(&self, list_id: TodoListId) -> Result<String, Error>;
-    async fn get_list_by_string(&self, list_name: String) -> Result<Option<FrontendList>, Error>;
+    async fn get_list_title(&self, list_id: TodoListId) -> Result<String, Error>;
+    async fn get_list_by_string(&self, list_name: String) -> Result<Option<TodoList>, Error>;
     async fn get_list_id_by_name(&self, list_name: String) -> Result<Option<String>, Error>;
-    async fn get_lists(&self) -> Result<Vec<FrontendList>, Error>;
+    async fn get_frontend_lists(&self) -> Result<Vec<TodoList>, Error>;
     async fn get_lists_string(&self) -> Result<Vec<String>, Error>;
 }
 
@@ -746,7 +746,7 @@ impl TodoDatabaseExt for PgPool {
         Ok(tags)
     }
 
-    async fn get_list(&self, list_id: TodoListId) -> Result<String, Error> {
+    async fn get_list_title(&self, list_id: TodoListId) -> Result<String, Error> {
         sqlx::query!(
             r#"
                 SELECT * FROM todo_lists
@@ -759,7 +759,7 @@ impl TodoDatabaseExt for PgPool {
         .map(|rec| rec.title)
     }
 
-    async fn get_list_by_string(&self, list_name: String) -> Result<Option<FrontendList>, Error> {
+    async fn get_list_by_string(&self, list_name: String) -> Result<Option<TodoList>, Error> {
         let list = sqlx::query!(
             r#"
                 SELECT * FROM todo_lists
@@ -772,7 +772,7 @@ impl TodoDatabaseExt for PgPool {
         // .map(|r| {let todos = self.get_todos(r.unwrap().id).await?;FrontendList {r.id.clone(), r.title.clone(), todos})
         if let Some(r) = list {
             let todos = self.get_todos(r.id.clone()).await?;
-            return Ok(Some(FrontendList {
+            return Ok(Some(TodoList {
                 id: r.id,
                 title: r.title.clone(),
                 todos,
@@ -794,7 +794,7 @@ impl TodoDatabaseExt for PgPool {
         .map(|r| r.id))
     }
 
-    async fn get_lists(&self) -> Result<Vec<FrontendList>, Error> {
+    async fn get_frontend_lists(&self) -> Result<Vec<TodoList>, Error> {
         let rows = sqlx::query!(
             r#"
         SELECT id, title FROM todo_lists AS list;
@@ -805,7 +805,7 @@ impl TodoDatabaseExt for PgPool {
         let mut lists = Vec::with_capacity(rows.len());
         for row in rows {
             let todos = self.get_todos(row.id.clone()).await?;
-            lists.push(FrontendList {
+            lists.push(TodoList {
                 id: row.id,
                 title: row.title,
                 todos,
@@ -825,23 +825,6 @@ impl TodoDatabaseExt for PgPool {
         .unwrap_or_default();
         let lists: Vec<TodoListId> = list_strings.iter().map(|rec| rec.title.clone()).collect();
         Ok(lists)
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct FrontendList {
-    pub id: String,
-    pub title: String,
-    pub todos: Vec<Todo>,
-}
-
-impl FrontendList {
-    pub fn new(name: String) -> Self {
-        Self {
-            id: String::from(Uuid::new_v4()),
-            title: String::from(name),
-            todos: Vec::new(),
-        }
     }
 }
 

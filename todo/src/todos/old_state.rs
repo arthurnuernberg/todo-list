@@ -8,7 +8,7 @@ use crate::todos::db::TodoDatabaseExt;
 use crate::todos::filter::filter;
 use crate::todos::forms::{AddTagForm, AllFilters, CreateListForm, DueDateForm, FrontendTodo, NewTodoForm, RemoveListForm, RemoveTagForm, RenameTagForm, SwitchListForm, TickForm, TitleUpdateForm, UpdateTodoDescriptionForm, UpdateTodoNameForm};
 use crate::todos::todo::Todo;
-use crate::todos::todos::{TagId, TodoId, TodoListId, json_encode_single, Tag};
+use crate::todos::tasks::{TagId, TodoId, TodoListId, json_encode_single, Tag};
 use axum::extract::{Query, State};
 use axum::response::{Html, Redirect};
 use axum::{Form, Json};
